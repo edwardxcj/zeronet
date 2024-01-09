@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   useQuery,
   useMutation,
@@ -62,6 +61,7 @@ export const useGetPosts = () => {
     queryFn: getInfinitePosts,
     initialPageParam: 0,
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     getNextPageParam: (lastPage: any) => {
       // If there's no data, there are no more pages.
       if (lastPage && lastPage.documents.length === 0) {
