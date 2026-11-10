@@ -2,6 +2,11 @@ import { ID, Query } from "appwrite";
 
 import { appwriteConfig, account, databases, storage, avatars } from "./config";
 import { IUpdatePost, INewPost, INewUser, IUpdateUser } from "@/types";
+import { normalizeImageUrls } from "./imageUrls";
+
+function withFileViewUrls<T>(value: T): T {
+  return normalizeImageUrls(value, appwriteConfig.url);
+}
 
 // ============================================================
 // AUTH
@@ -52,7 +57,7 @@ export async function saveUserToDB(user: {
       user
     );
 
-    return newUser;
+    return withFileViewUrls(newUser);
   } catch (error) {
     console.log(error);
   }
@@ -95,7 +100,7 @@ export async function getCurrentUser() {
 
     if (!currentUser) throw Error;
 
-    return currentUser.documents[0];
+    return withFileViewUrls(currentUser.documents[0]);
   } catch (error) {
     console.log(error);
     return null;
@@ -126,7 +131,7 @@ export async function createPost(post: INewPost) {
     if (!uploadedFile) throw Error;
 
     // Get file url
-    const fileUrl = getFilePreview(uploadedFile.$id);
+    const fileUrl = getFileView(uploadedFile.$id);
     if (!fileUrl) {
       await deleteFile(uploadedFile.$id);
       throw Error;
@@ -155,7 +160,7 @@ export async function createPost(post: INewPost) {
       throw Error;
     }
 
-    return newPost;
+    return withFileViewUrls(newPost);
   } catch (error) {
     console.log(error);
   }
@@ -177,16 +182,9 @@ export async function uploadFile(file: File) {
 }
 
 // ============================== GET FILE URL
-export function getFilePreview(fileId: string) {
+export function getFileView(fileId: string) {
   try {
-    const fileUrl = storage.getFilePreview(
-      appwriteConfig.storageId,
-      fileId,
-      2000,
-      2000,
-      "top",
-      100
-    );
+    const fileUrl = storage.getFileView(appwriteConfig.storageId, fileId);
 
     if (!fileUrl) throw Error;
 
@@ -218,7 +216,7 @@ export async function searchPosts(searchTerm: string) {
 
     if (!posts) throw Error;
 
-    return posts;
+    return withFileViewUrls(posts);
   } catch (error) {
     console.log(error);
   }
@@ -241,7 +239,7 @@ export async function getInfinitePosts({ pageParam }: { pageParam: number }) {
 
     if (!posts) throw Error;
 
-    return posts;
+    return withFileViewUrls(posts);
   } catch (error) {
     console.log(error);
   }
@@ -260,7 +258,7 @@ export async function getPostById(postId?: string) {
 
     if (!post) throw Error;
 
-    return post;
+    return withFileViewUrls(post);
   } catch (error) {
     console.log(error);
   }
@@ -282,7 +280,7 @@ export async function updatePost(post: IUpdatePost) {
       if (!uploadedFile) throw Error;
 
       // Get new file url
-      const fileUrl = getFilePreview(uploadedFile.$id);
+      const fileUrl = getFileView(uploadedFile.$id);
       if (!fileUrl) {
         await deleteFile(uploadedFile.$id);
         throw Error;
@@ -324,7 +322,7 @@ export async function updatePost(post: IUpdatePost) {
       await deleteFile(post.imageId);
     }
 
-    return updatedPost;
+    return withFileViewUrls(updatedPost);
   } catch (error) {
     console.log(error);
   }
@@ -365,7 +363,7 @@ export async function likePost(postId: string, likesArray: string[]) {
 
     if (!updatedPost) throw Error;
 
-    return updatedPost;
+    return withFileViewUrls(updatedPost);
   } catch (error) {
     console.log(error);
   }
@@ -386,7 +384,7 @@ export async function savePost(userId: string, postId: string) {
 
     if (!updatedPost) throw Error;
 
-    return updatedPost;
+    return withFileViewUrls(updatedPost);
   } catch (error) {
     console.log(error);
   }
@@ -421,7 +419,7 @@ export async function getUserPosts(userId?: string) {
 
     if (!post) throw Error;
 
-    return post;
+    return withFileViewUrls(post);
   } catch (error) {
     console.log(error);
   }
@@ -438,7 +436,7 @@ export async function getRecentPosts() {
 
     if (!posts) throw Error;
 
-    return posts;
+    return withFileViewUrls(posts);
   } catch (error) {
     console.log(error);
   }
@@ -466,7 +464,7 @@ export async function getUsers(limit?: number) {
 
     if (!users) throw Error;
 
-    return users;
+    return withFileViewUrls(users);
   } catch (error) {
     console.log(error);
   }
@@ -483,7 +481,7 @@ export async function getUserById(userId: string) {
 
     if (!user) throw Error;
 
-    return user;
+    return withFileViewUrls(user);
   } catch (error) {
     console.log(error);
   }
@@ -504,7 +502,7 @@ export async function updateUser(user: IUpdateUser) {
       if (!uploadedFile) throw Error;
 
       // Get new file url
-      const fileUrl = getFilePreview(uploadedFile.$id);
+      const fileUrl = getFileView(uploadedFile.$id);
       if (!fileUrl) {
         await deleteFile(uploadedFile.$id);
         throw Error;
@@ -541,7 +539,7 @@ export async function updateUser(user: IUpdateUser) {
       await deleteFile(user.imageId);
     }
 
-    return updatedUser;
+    return withFileViewUrls(updatedUser);
   } catch (error) {
     console.log(error);
   }
