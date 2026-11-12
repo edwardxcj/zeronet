@@ -26,11 +26,11 @@ const LeftSidebar = () => {
   return (
     <nav className="leftsidebar">
       <div className="flex flex-col gap-11">
-        <Link to="/" className="flex gap-3 items-center">
+        <Link to="/" className="flex gap-3 items-center" aria-label="ZeroNet home">
           <img
-            src="/assets/images/logo.svg"
-            alt="logo"
-            width={170}
+            src="/assets/images/zeronet-logo.svg"
+            alt=""
+            width={160}
             height={36}
           />
         </Link>

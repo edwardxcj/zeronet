@@ -17,12 +17,12 @@ const Topbar = () => {
   return (
     <section className="topbar">
       <div className="flex-between py-4 px-5">
-        <Link to="/" className="flex gap-3 items-center">
+        <Link to="/" className="flex gap-3 items-center" aria-label="ZeroNet home">
           <img
-            src="/assets/images/logo.svg"
-            alt="logo"
-            width={130}
-            height={325}
+            src="/assets/images/zeronet-logo.svg"
+            alt=""
+            width={128}
+            height={29}
           />
         </Link>
 

@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/:page(sign-in|sign-up|explore|saved|all-users|create-post)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/:section(posts|profile|update-post|update-profile)/:path+",
+      "destination": "/index.html"
+    }
+  ]
+}
