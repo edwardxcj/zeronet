@@ -13,6 +13,7 @@ import { useUserContext } from "@/context/AuthContext";
 import { useGetUserById } from "@/lib/react-query/queriesAndMutations";
 import Loader from "@/components/shared/Loader";
 import GridPostList from "@/components/shared/GridPostList";
+import { relationshipDocuments } from "@/lib/appwrite/relationships";
 
 interface StabBlockProps {
   value: string | number;
@@ -31,14 +32,26 @@ const Profile = () => {
   const { user } = useUserContext();
   const { pathname } = useLocation();
 
-  const { data: currentUser } = useGetUserById(id || "");
+  const { data: currentUser, isLoading, refetch } = useGetUserById(id || "");
 
-  if (!currentUser)
+  if (isLoading)
     return (
       <div className="flex-center w-full h-full">
         <Loader />
       </div>
     );
+
+  if (!currentUser) {
+    return (
+      <div className="flex-center flex-col w-full h-full gap-4 px-5 text-center">
+        <p role="alert">Couldn’t load this profile.</p>
+        {id && <Button onClick={() => void refetch()}>Try again</Button>}
+        <Link to="/" className="text-primary-500">Back to Home</Link>
+      </div>
+    );
+  }
+
+  const posts = relationshipDocuments(currentUser.posts);
 
   return (
     <div className="profile-container">
@@ -62,7 +75,7 @@ const Profile = () => {
             </div>
 
             <div className="flex gap-8 mt-10 items-center justify-center xl:justify-start flex-wrap z-20">
-              <StatBlock value={currentUser.posts.length} label="Posts" />
+              <StatBlock value={posts.length} label="Posts" />
               <StatBlock value={20} label="Followers" />
               <StatBlock value={20} label="Following" />
             </div>
@@ -136,7 +149,13 @@ const Profile = () => {
       <Routes>
         <Route
           index
-          element={<GridPostList posts={currentUser.posts} showUser={false} />}
+          element={
+            posts.length > 0 ? (
+              <GridPostList posts={posts} showUser={false} />
+            ) : (
+              <p className="text-light-4">No posts yet</p>
+            )
+          }
         />
         {currentUser.$id === user.id && (
           <Route path="/liked-posts" element={<LikedPosts />} />

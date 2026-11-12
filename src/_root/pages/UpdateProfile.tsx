@@ -1,4 +1,5 @@
 import * as z from "zod";
+import type { Models } from "appwrite";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate, useParams } from "react-router-dom";
@@ -25,58 +26,55 @@ import {
 import Loader from "@/components/shared/Loader";
 import ProfileUploader from "@/components/shared/ProfileUploader";
 
-const UpdateProfile = () => {
+const UpdateProfileForm = ({ currentUser }: { currentUser: Models.Document }) => {
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { id } = useParams();
-  const { user, setUser } = useUserContext();
+  const { setUser } = useUserContext();
+  const { mutateAsync: updateUser } = useUpdateUser();
   const form = useForm<z.infer<typeof ProfileValidation>>({
     resolver: zodResolver(ProfileValidation),
     defaultValues: {
       file: [],
-      name: user.name,
-      username: user.username,
-      email: user.email,
-      bio: user.bio || "",
+      name: currentUser.name ?? "",
+      username: currentUser.username ?? "",
+      email: currentUser.email ?? "",
+      bio: currentUser.bio ?? "",
     },
   });
 
-  // Queries
-  const { data: currentUser } = useGetUserById(id || "");
-  const { mutateAsync: updateUser, isPending: isLoadingUpdate } =
-    useUpdateUser();
+  const { isSubmitting } = form.formState;
 
-  if (!currentUser)
-    return (
-      <div className="flex-center w-full h-full">
-        <Loader />
-      </div>
-    );
-
-  // Handler
   const handleUpdate = async (value: z.infer<typeof ProfileValidation>) => {
-    const updatedUser = await updateUser({
-      userId: currentUser.$id,
-      name: value.name,
-      bio: value.bio,
-      file: value.file,
-      imageUrl: currentUser.imageUrl,
-      imageId: currentUser.imageId,
-    });
+    try {
+      const updatedUser = await updateUser({
+        userId: currentUser.$id,
+        name: value.name,
+        bio: value.bio,
+        file: value.file,
+        imageUrl: currentUser.imageUrl,
+        imageId: currentUser.imageId,
+      });
 
-    if (!updatedUser) {
+      if (!updatedUser) throw new Error("Profile update failed");
+
+      setUser((user) => {
+        if (user.id !== updatedUser.$id) return user;
+
+        return {
+          ...user,
+          name: updatedUser.name,
+          bio: updatedUser.bio,
+          imageUrl: updatedUser.imageUrl,
+        };
+      });
+      navigate(`/profile/${currentUser.$id}`);
+    } catch {
       toast({
-        title: `Update user failed. Please try again.`,
+        variant: "destructive",
+        title: "Could not save your profile",
+        description: "Please try again.",
       });
     }
-
-    setUser({
-      ...user,
-      name: updatedUser?.name,
-      bio: updatedUser?.bio,
-      imageUrl: updatedUser?.imageUrl,
-    });
-    return navigate(`/profile/${id}`);
   };
 
   return (
@@ -194,9 +192,9 @@ const UpdateProfile = () => {
               <Button
                 type="submit"
                 className="shad-button_primary whitespace-nowrap"
-                disabled={isLoadingUpdate}
+                disabled={isSubmitting}
               >
-                {isLoadingUpdate && <Loader />}
+                {isSubmitting && <Loader />}
                 Update Profile
               </Button>
             </div>
@@ -205,6 +203,29 @@ const UpdateProfile = () => {
       </div>
     </div>
   );
+};
+
+const UpdateProfile = () => {
+  const { id } = useParams();
+  const { data: currentUser, isLoading } = useGetUserById(id ?? "");
+
+  if (isLoading) {
+    return (
+      <div className="flex-center w-full h-full">
+        <Loader />
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <div className="common-container" role="alert">
+        This profile could not be loaded.
+      </div>
+    );
+  }
+
+  return <UpdateProfileForm key={currentUser.$id} currentUser={currentUser} />;
 };
 
 export default UpdateProfile;

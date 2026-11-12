@@ -13,6 +13,9 @@ const PostCard = ({ post }: PostCardProps) => {
   const { user } = useUserContext();
 
   if (!post.creator) return;
+  const tags = Array.isArray(post.tags)
+    ? post.tags.filter((tag) => typeof tag === "string" && tag.trim())
+    : [];
 
   return (
     <div className="post-card">
@@ -62,7 +65,7 @@ const PostCard = ({ post }: PostCardProps) => {
         <div className="small-medium lg:base-medium py-5">
           <p>{post.caption}</p>
           <ul className="flex gap-1 mt-2">
-            {post.tags.map((tag: string, index: string) => (
+            {tags.map((tag, index) => (
               <li key={`${tag}${index}`} className="text-light-3 small-regular">
                 #{tag}
               </li>

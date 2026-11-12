@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/form";
 import { Textarea } from "../ui/textarea";
 import FileUploader from "../shared/FileUploader";
-import { PostValidation } from "@/lib/validation";
+import { CreatePostValidation, PostValidation } from "@/lib/validation";
 import { Models } from "appwrite";
 import {
   useCreatePost,
@@ -23,63 +23,68 @@ import { useUserContext } from "@/context/AuthContext";
 import { Input } from "../ui/input";
 import { useToast } from "../ui/use-toast";
 
-type PostFormProps = {
-  post?: Models.Document;
-  action: "Create" | "Update";
-};
+type PostFormProps =
+  | { action: "Create"; post?: never }
+  | { action: "Update"; post: Models.Document };
+
+type PostFormValues = z.infer<typeof PostValidation>;
 
 const PostForm = ({ post, action }: PostFormProps) => {
-  const { mutateAsync: createPost, isPending: isLoadingCreate } =
-    useCreatePost();
-  const { mutateAsync: updatePost, isPending: isLoadingUpdate } =
-    useUpdatePost();
+  const { mutateAsync: createPost } = useCreatePost();
+  const { mutateAsync: updatePost } = useUpdatePost();
 
   const { user } = useUserContext();
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  // 1. Define your form.
-  const form = useForm<z.infer<typeof PostValidation>>({
-    resolver: zodResolver(PostValidation),
+  const form = useForm<PostFormValues>({
+    resolver: zodResolver(
+      action === "Create" ? CreatePostValidation : PostValidation
+    ),
     defaultValues: {
-      caption: post ? post?.caption : "",
+      caption: post?.caption ?? "",
       file: [],
-      location: post ? post?.location : "",
-      tags: post ? post.tags.join(",") : "",
+      location: post?.location ?? "",
+      tags: Array.isArray(post?.tags) ? post.tags.join(",") : "",
     },
   });
 
-  // 2. Define a submit handler.
-  async function onSubmit(values: z.infer<typeof PostValidation>) {
-    if (post && action === "Update") {
-      const updatedPost = await updatePost({
-        ...values,
-        postId: post.$id,
-        imageId: post?.imageId,
-        imageUrl: post?.imageUrl,
-      });
+  const { isSubmitting } = form.formState;
 
-      if (!updatedPost) {
-        toast({
-          title: "Please try again",
+  async function onSubmit(values: PostFormValues) {
+    try {
+      if (action === "Update") {
+        const updatedPost = await updatePost({
+          ...values,
+          postId: post.$id,
+          imageId: post.imageId,
+          imageUrl: post.imageUrl,
         });
+
+        if (!updatedPost) throw new Error("Post update failed");
+
+        navigate(`/posts/${post.$id}`);
+        return;
       }
 
-      return navigate(`/posts/${post.$id}`);
-    }
+      const newPost = await createPost({
+        ...values,
+        userId: user.id,
+      });
 
-    const newPost = await createPost({
-      ...values,
-      userId: user.id,
-    });
+      if (!newPost) throw new Error("Post creation failed");
 
-    if (!newPost) {
+      navigate("/");
+    } catch {
       toast({
-        title: "Please try again",
+        variant: "destructive",
+        title:
+          action === "Create"
+            ? "Could not publish your post"
+            : "Could not save your changes",
+        description: "Please try again.",
       });
     }
-
-    navigate("/");
   }
 
   return (
@@ -109,7 +114,7 @@ const PostForm = ({ post, action }: PostFormProps) => {
           name="file"
           render={({ field }) => (
             <FormItem>
-              <FormLabel className="shad-form_label">Add Photos</FormLabel>
+              <FormLabel className="shad-form_label">Photo</FormLabel>
               <FormControl>
                 <FileUploader
                   fieldChange={field.onChange}
@@ -164,10 +169,9 @@ const PostForm = ({ post, action }: PostFormProps) => {
           <Button
             type="submit"
             className="shad-button_primary whitespace-nowrap"
-            disabled={isLoadingCreate || isLoadingUpdate}
+            disabled={isSubmitting}
           >
-            {isLoadingCreate || (isLoadingUpdate && "Loading...")}
-            {action} Post
+            {isSubmitting ? "Saving..." : `${action} Post`}
           </Button>
         </div>
       </form>

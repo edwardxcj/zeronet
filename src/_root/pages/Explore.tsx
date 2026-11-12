@@ -1,63 +1,52 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState } from "react";
 import { useInView } from "react-intersection-observer";
 
+import GridPostList from "@/components/shared/GridPostList";
+import Loader from "@/components/shared/Loader";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import useDebounce from "@/hooks/useDebounce";
-
 import {
   useGetPosts,
   useSearchPosts,
 } from "@/lib/react-query/queriesAndMutations";
-import GridPostList from "@/components/shared/GridPostList";
-import { Input } from "@/components/ui/input";
-import Loader from "@/components/shared/Loader";
-
-export type SearchResultProps = {
-  isSearchFetching: boolean;
-  searchedPosts: any;
-};
-
-const SearchResults = ({
-  isSearchFetching,
-  searchedPosts,
-}: SearchResultProps) => {
-  if (isSearchFetching) {
-    return <Loader />;
-  } else if (searchedPosts && searchedPosts.documents.length > 0) {
-    return <GridPostList posts={searchedPosts.documents} />;
-  } else {
-    return (
-      <p className="text-light-4 mt-10 text-center w-full">No results found</p>
-    );
-  }
-};
 
 const Explore = () => {
   const { ref, inView } = useInView();
-  const { data: posts, fetchNextPage, hasNextPage } = useGetPosts();
-
   const [searchValue, setSearchValue] = useState("");
-  const debouncedSearch = useDebounce(searchValue, 500);
-  const { data: searchedPosts, isFetching: isSearchFetching } =
-    useSearchPosts(debouncedSearch);
+  const searchTerm = searchValue.trim();
+  const isSearching = searchTerm.length > 0;
+  const debouncedSearch = useDebounce(searchTerm, 500);
+  const feed = useGetPosts();
+  const search = useSearchPosts(isSearching ? debouncedSearch : "");
+  const activeQuery = isSearching ? search : feed;
+  const {
+    fetchNextPage,
+    fetchStatus,
+    hasNextPage,
+    isFetching,
+    isFetchingNextPage,
+    isError,
+  } = feed;
+  const posts = isSearching
+    ? search.data?.documents ?? []
+    : feed.data?.pages.flatMap((page) => page?.documents ?? []) ?? [];
+  const isLoading =
+    (isSearching && searchTerm !== debouncedSearch) ||
+    (activeQuery.isPending && !activeQuery.isPaused);
+  const hasFeedUpdateError = feed.isRefetchError;
 
   useEffect(() => {
-    if (inView && !searchValue) {
-      fetchNextPage();
+    if (
+      inView &&
+      !isSearching &&
+      hasNextPage &&
+      fetchStatus === "idle" &&
+      !isError
+    ) {
+      void fetchNextPage({ cancelRefetch: false });
     }
-  }, [fetchNextPage, inView, searchValue]);
-
-  if (!posts)
-    return (
-      <div className="flex-center w-full h-full">
-        <Loader />
-      </div>
-    );
-
-  const shouldShowSearchResults = searchValue !== "";
-  const shouldShowPosts =
-    !shouldShowSearchResults &&
-    posts.pages.every((item) => item?.documents.length === 0);
+  }, [fetchNextPage, fetchStatus, hasNextPage, inView, isError, isSearching]);
 
   return (
     <div className="explore-container">
@@ -68,53 +57,64 @@ const Explore = () => {
             src="/assets/icons/search.svg"
             width={24}
             height={24}
-            alt="search"
+            alt=""
           />
           <Input
             type="text"
             placeholder="Search"
+            aria-label="Search posts"
             className="explore-search"
             value={searchValue}
-            onChange={(e) => {
-              const { value } = e.target;
-              setSearchValue(value);
-            }}
+            onChange={(event) => setSearchValue(event.target.value)}
           />
         </div>
       </div>
 
-      <div className="flex-between w-full max-w-5xl mt-16 mb-7">
-        <h3 className="body-bold md:h3-bold">Popular Today</h3>
-
-        <div className="flex-center gap-3 bg-dark-3 rounded-xl px-4 py-2 cursor-pointer">
-          <p className="small-medium md:base-medium text-light-2">All</p>
-          <img
-            src="/assets/icons/filter.svg"
-            width={20}
-            height={20}
-            alt="filter"
-          />
-        </div>
-      </div>
+      <h3 className="body-bold md:h3-bold w-full max-w-5xl mt-16 mb-7">
+        {isSearching ? "Search Results" : "Recently Updated"}
+      </h3>
 
       <div className="flex flex-wrap gap-9 w-full max-w-5xl">
-        {shouldShowSearchResults ? (
-          <SearchResults
-            isSearchFetching={isSearchFetching}
-            searchedPosts={searchedPosts}
-          />
-        ) : shouldShowPosts ? (
-          <p className="text-light-4 mt-10 text-center w-full">End of posts</p>
+        {isLoading ? (
+          <Loader />
+        ) : !activeQuery.data ? (
+          <div className="flex w-full flex-col items-center gap-3" role="status">
+            <p className="text-light-4">
+              {isSearching ? "Could not search posts." : "Could not load posts."}
+            </p>
+            <Button
+              className="shad-button_dark_4"
+              disabled={activeQuery.isFetching}
+              onClick={() => void activeQuery.refetch()}
+            >
+              Try again
+            </Button>
+          </div>
+        ) : posts.length > 0 ? (
+          <GridPostList posts={posts} />
         ) : (
-          posts.pages.map((item, index) => (
-            <GridPostList key={`page-${index}`} posts={item?.documents} />
-          ))
+          <p className="text-light-4 mt-10 text-center w-full">
+            {isSearching ? "No results found." : "No posts yet."}
+          </p>
         )}
       </div>
 
-      {hasNextPage && !searchValue && (
-        <div ref={ref} className="mt-10">
-          <Loader />
+      {!isSearching && (hasNextPage || hasFeedUpdateError) && (
+        <div ref={ref} className="mt-10 min-h-px">
+          {hasFeedUpdateError ? (
+            <div className="flex flex-col items-center gap-3" role="status">
+              <p className="text-light-4">Could not update posts.</p>
+              <Button
+                className="shad-button_dark_4"
+                disabled={isFetching}
+                onClick={() => void feed.refetch()}
+              >
+                Try again
+              </Button>
+            </div>
+          ) : (
+            isFetchingNextPage && <Loader />
+          )}
         </div>
       )}
     </div>

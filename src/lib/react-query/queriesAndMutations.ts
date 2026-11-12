@@ -3,7 +3,9 @@ import {
   useMutation,
   useQueryClient,
   useInfiniteQuery,
+  type QueryClient,
 } from "@tanstack/react-query";
+import { AppwriteException, type Models } from "appwrite";
 
 import { QUERY_KEYS } from "@/lib/react-query/queryKeys";
 import {
@@ -27,6 +29,27 @@ import {
   deleteSavedPost,
 } from "@/lib/appwrite/api";
 import { INewPost, INewUser, IUpdatePost, IUpdateUser } from "@/types";
+import { relationshipDocuments, relationshipId } from "@/lib/appwrite/relationships";
+
+const currentUserKey = [QUERY_KEYS.GET_CURRENT_USER];
+
+function retryDocumentRequest(failureCount: number, error: Error) {
+  if (error instanceof AppwriteException && [400, 401, 403, 404].includes(error.code)) {
+    return false;
+  }
+  return failureCount < 2;
+}
+
+function invalidatePostLists(queryClient: QueryClient) {
+  return Promise.all([
+    QUERY_KEYS.GET_RECENT_POSTS,
+    QUERY_KEYS.GET_INFINITE_POSTS,
+    QUERY_KEYS.GET_USER_POSTS,
+    QUERY_KEYS.SEARCH_POSTS,
+    QUERY_KEYS.GET_USER_BY_ID,
+    QUERY_KEYS.GET_CURRENT_USER,
+  ].map((key) => queryClient.invalidateQueries({ queryKey: [key] })));
+}
 
 // ============================================================
 // AUTH QUERIES
@@ -59,19 +82,13 @@ export const useGetPosts = () => {
   return useInfiniteQuery({
     queryKey: [QUERY_KEYS.GET_INFINITE_POSTS],
     queryFn: getInfinitePosts,
-    initialPageParam: 0,
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    getNextPageParam: (lastPage: any) => {
-      // If there's no data, there are no more pages.
-      if (lastPage && lastPage.documents.length === 0) {
-        return null;
-      }
-
-      // Use the $id of the last document as the cursor.
-      const lastId = lastPage?.documents[lastPage.documents.length - 1].$id;
-      return lastId;
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage, pages) => {
+      const loaded = pages.reduce((count, page) => count + page.documents.length, 0);
+      if (loaded >= lastPage.total) return undefined;
+      return lastPage.documents[lastPage.documents.length - 1]?.$id;
     },
+    retry: retryDocumentRequest,
   });
 };
 
@@ -80,6 +97,7 @@ export const useSearchPosts = (searchTerm: string) => {
     queryKey: [QUERY_KEYS.SEARCH_POSTS, searchTerm],
     queryFn: () => searchPosts(searchTerm),
     enabled: !!searchTerm,
+    retry: retryDocumentRequest,
   });
 };
 
@@ -94,10 +112,8 @@ export const useCreatePost = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (post: INewPost) => createPost(post),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [QUERY_KEYS.GET_RECENT_POSTS],
-      });
+    onSuccess: (post) => {
+      if (post) void invalidatePostLists(queryClient);
     },
   });
 };
@@ -107,6 +123,7 @@ export const useGetPostById = (postId?: string) => {
     queryKey: [QUERY_KEYS.GET_POST_BY_ID, postId],
     queryFn: () => getPostById(postId),
     enabled: !!postId,
+    retry: retryDocumentRequest,
   });
 };
 
@@ -115,6 +132,7 @@ export const useGetUserPosts = (userId?: string) => {
     queryKey: [QUERY_KEYS.GET_USER_POSTS, userId],
     queryFn: () => getUserPosts(userId),
     enabled: !!userId,
+    retry: retryDocumentRequest,
   });
 };
 
@@ -123,9 +141,9 @@ export const useUpdatePost = () => {
   return useMutation({
     mutationFn: (post: IUpdatePost) => updatePost(post),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({
-        queryKey: [QUERY_KEYS.GET_POST_BY_ID, data?.$id],
-      });
+      if (!data) return;
+      void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.GET_POST_BY_ID, data.$id] });
+      void invalidatePostLists(queryClient);
     },
   });
 };
@@ -133,12 +151,14 @@ export const useUpdatePost = () => {
 export const useDeletePost = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ postId, imageId }: { postId?: string; imageId: string }) =>
+    mutationFn: ({ postId, imageId }: { postId: string; imageId?: string }) =>
       deletePost(postId, imageId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [QUERY_KEYS.GET_RECENT_POSTS],
+    onSuccess: (_, { postId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [QUERY_KEYS.GET_POST_BY_ID, postId],
+        refetchType: "none",
       });
+      void invalidatePostLists(queryClient);
     },
   });
 };
@@ -154,18 +174,8 @@ export const useLikePost = () => {
       likesArray: string[];
     }) => likePost(postId, likesArray),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({
-        queryKey: [QUERY_KEYS.GET_POST_BY_ID, data?.$id],
-      });
-      queryClient.invalidateQueries({
-        queryKey: [QUERY_KEYS.GET_RECENT_POSTS],
-      });
-      queryClient.invalidateQueries({
-        queryKey: [QUERY_KEYS.GET_POSTS],
-      });
-      queryClient.invalidateQueries({
-        queryKey: [QUERY_KEYS.GET_CURRENT_USER],
-      });
+      void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.GET_POST_BY_ID, data.$id] });
+      void invalidatePostLists(queryClient);
     },
   });
 };
@@ -173,17 +183,16 @@ export const useLikePost = () => {
 export const useSavePost = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ userId, postId }: { userId: string; postId: string }) =>
-      savePost(userId, postId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [QUERY_KEYS.GET_RECENT_POSTS],
-      });
-      queryClient.invalidateQueries({
-        queryKey: [QUERY_KEYS.GET_POSTS],
-      });
-      queryClient.invalidateQueries({
-        queryKey: [QUERY_KEYS.GET_CURRENT_USER],
+    mutationFn: ({ userId, post }: { userId: string; post: Models.Document }) =>
+      savePost(userId, post.$id),
+    onSuccess: async (record, { post, userId }) => {
+      await queryClient.cancelQueries({ queryKey: currentUserKey });
+      queryClient.setQueryData<Models.Document | null>(currentUserKey, (profile) => {
+        if (!profile || profile.$id !== userId) return profile;
+        const otherRecords = relationshipDocuments(profile.save).filter(
+          (saved) => relationshipId(saved.post) !== post.$id
+        );
+        return { ...profile, save: [...otherRecords, { ...record, post }] };
       });
     },
   });
@@ -193,15 +202,14 @@ export const useDeleteSavedPost = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (savedRecordId: string) => deleteSavedPost(savedRecordId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [QUERY_KEYS.GET_RECENT_POSTS],
-      });
-      queryClient.invalidateQueries({
-        queryKey: [QUERY_KEYS.GET_POSTS],
-      });
-      queryClient.invalidateQueries({
-        queryKey: [QUERY_KEYS.GET_CURRENT_USER],
+    onSuccess: async (_, savedRecordId) => {
+      await queryClient.cancelQueries({ queryKey: currentUserKey });
+      queryClient.setQueryData<Models.Document | null>(currentUserKey, (profile) => {
+        if (!profile) return profile;
+        return {
+          ...profile,
+          save: relationshipDocuments(profile.save).filter((record) => record.$id !== savedRecordId),
+        };
       });
     },
   });
@@ -213,14 +221,14 @@ export const useDeleteSavedPost = () => {
 
 export const useGetCurrentUser = () => {
   return useQuery({
-    queryKey: [QUERY_KEYS.GET_CURRENT_USER],
+    queryKey: currentUserKey,
     queryFn: getCurrentUser,
   });
 };
 
 export const useGetUsers = (limit?: number) => {
   return useQuery({
-    queryKey: [QUERY_KEYS.GET_USERS],
+    queryKey: [QUERY_KEYS.GET_USERS, limit],
     queryFn: () => getUsers(limit),
   });
 };
@@ -230,6 +238,7 @@ export const useGetUserById = (userId: string) => {
     queryKey: [QUERY_KEYS.GET_USER_BY_ID, userId],
     queryFn: () => getUserById(userId),
     enabled: !!userId,
+    retry: retryDocumentRequest,
   });
 };
 

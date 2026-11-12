@@ -1,28 +1,33 @@
-import { useCallback, useState } from "react";
-import { FileWithPath, useDropzone } from "react-dropzone";
+import { useCallback, useEffect, useState } from "react";
+import { useDropzone } from "react-dropzone";
 import { convertFileToUrl } from "@/lib/utils";
 import { Button } from "../ui/button";
 
 type FileUploaderProps = {
   fieldChange: (files: File[]) => void;
-  mediaUrl: string;
+  mediaUrl?: string;
 };
 
 const FileUploader = ({ fieldChange, mediaUrl }: FileUploaderProps) => {
-  const [file, setFile] = useState<File[]>([]);
-  const [fileUrl, setFileUrl] = useState<string>(mediaUrl);
+  const [previewUrl, setPreviewUrl] = useState<string>();
+  const fileUrl = previewUrl ?? mediaUrl;
 
-  const onDrop = useCallback(
-    (acceptedFiles: FileWithPath[]) => {
-      setFile(acceptedFiles);
+  useEffect(() => {
+    if (previewUrl) return () => URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  const onDropAccepted = useCallback(
+    (acceptedFiles: File[]) => {
       fieldChange(acceptedFiles);
-      setFileUrl(convertFileToUrl(acceptedFiles[0]));
+      setPreviewUrl(convertFileToUrl(acceptedFiles[0]));
     },
-    [file]
+    [fieldChange]
   );
 
-  const { getRootProps, getInputProps } = useDropzone({
-    onDrop,
+  const { getRootProps, getInputProps, fileRejections } = useDropzone({
+    onDropAccepted,
+    multiple: false,
+    minSize: 1,
     accept: {
       "image/*": [".png", ".jpeg", ".jpg"],
     },
@@ -54,12 +59,17 @@ const FileUploader = ({ fieldChange, mediaUrl }: FileUploaderProps) => {
           <h3 className="base-medium text-light-2 mb-2 mt-6">
             Drag photo here
           </h3>
-          <p className="text-light-4 small-regular mb-6">SVG, PNG, JPG</p>
+          <p className="text-light-4 small-regular mb-6">For example, PNG or JPG</p>
 
           <Button type="button" className="shad-button_dark_4">
             Select from computer
           </Button>
         </div>
+      )}
+      {fileRejections.length > 0 && (
+        <p role="alert" className="small-regular px-4 pb-4 text-red-400">
+          Choose one image file that is not empty.
+        </p>
       )}
     </div>
   );
