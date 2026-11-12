@@ -3,6 +3,7 @@ import { ID, Query } from "appwrite";
 import { appwriteConfig, account, databases, storage, avatars } from "./config";
 import { IUpdatePost, INewPost, INewUser, IUpdateUser } from "@/types";
 import { normalizeImageUrls } from "./imageUrls";
+import { relationshipIds } from "./relationships";
 
 function withFileViewUrls<T>(value: T): T {
   return normalizeImageUrls(value, appwriteConfig.url);
@@ -315,12 +316,20 @@ export async function deletePost(postId: string, imageId?: string) {
 }
 
 // ============================== LIKE / UNLIKE POST
-export async function likePost(postId: string, likesArray: string[]) {
+export async function likePost(postId: string, userId: string, shouldLike: boolean) {
+  const post = await getPostById(postId);
+  const likes = relationshipIds(post.likes);
+  if (!likes) throw new Error("Likes are unavailable for this post.");
+  if (likes.includes(userId) === shouldLike) return post;
+
+  const nextLikes = shouldLike
+    ? [...likes, userId]
+    : likes.filter((id) => id !== userId);
   const updatedPost = await databases.updateDocument(
     appwriteConfig.databaseId,
     appwriteConfig.postCollectionId,
     postId,
-    { likes: likesArray }
+    { likes: nextLikes }
   );
   return withFileViewUrls(updatedPost);
 }

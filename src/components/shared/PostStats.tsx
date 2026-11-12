@@ -31,11 +31,17 @@ const PostStats = ({ post, userId }: PostStatsProps) => {
 
   const { data: currentUser } = useGetCurrentUser();
 
-  const savedPostRecord = relationshipDocuments(currentUser?.save).find(
+  const savedRecords = relationshipDocuments(currentUser?.save);
+  const savedPostRecord = savedRecords.find(
     (record) => post && relationshipId(record.post) === post.$id
   );
   const isSaved = !!savedPostRecord;
-  const canSave = !!post && !!userId && currentUser?.$id === userId;
+  const savedRecordsKnown =
+    Array.isArray(currentUser?.save) &&
+    savedRecords.length === currentUser.save.length &&
+    savedRecords.every((record) => relationshipId(record.post) !== undefined);
+  const canSave =
+    !!post && !!userId && currentUser?.$id === userId && (isSaved || savedRecordsKnown);
 
   useEffect(() => {
     setLikes(relationshipIds(post?.likes));
@@ -45,12 +51,13 @@ const PostStats = ({ post, userId }: PostStatsProps) => {
     e.stopPropagation();
     if (!post || !userId || !likes || isLiking) return;
 
-    const newLikes = likes.includes(userId)
-      ? likes.filter((id) => id !== userId)
-      : [...likes, userId];
     try {
-      const updated = await likePost({ postId: post.$id, likesArray: newLikes });
-      setLikes(relationshipIds(updated.likes) ?? newLikes);
+      const updated = await likePost({
+        postId: post.$id,
+        userId,
+        shouldLike: !likes.includes(userId),
+      });
+      setLikes(relationshipIds(updated.likes));
     } catch {
       toast({ title: "Couldn’t update your like. Try again." });
     }
@@ -104,6 +111,7 @@ const PostStats = ({ post, userId }: PostStatsProps) => {
             aria-label={isSaved ? "Unsave post" : "Save post"}
             aria-pressed={isSaved}
             disabled={!canSave}
+            title={canSave ? undefined : "Saved posts unavailable"}
             onClick={handleSavePost}
             className="disabled:opacity-60"
           >
