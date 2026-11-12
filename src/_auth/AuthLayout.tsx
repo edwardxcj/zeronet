@@ -13,10 +13,9 @@ const AuthLayout = () => {
             <Outlet />
           </section>
 
-          <img
-            src="/assets/images/side-img.svg"
-            alt="logo"
-            className="hidden xl:block h-screen w-1/2 object-cover bg-no-repeat"
+          <div
+            aria-hidden="true"
+            className="hidden h-screen w-1/2 shrink-0 bg-cover bg-center xl:block xl:bg-[url('/assets/images/auth-neon.webp')]"
           />
         </>
       )}
