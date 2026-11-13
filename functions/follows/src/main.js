@@ -16,9 +16,10 @@ function pairId(followerId, followingId) {
 function readRequest(req) {
   try {
     const body = req.bodyJson ?? JSON.parse(req.bodyText ?? req.body ?? "");
+    if (!body || typeof body !== "object") return null;
+    if (body.action === "listFollowing") return body;
+
     if (
-      !body ||
-      typeof body !== "object" ||
       !isId(body.targetId) ||
       (body.action !== "get" && body.action !== "set") ||
       (body.action === "set" && typeof body.following !== "boolean") ||
@@ -50,6 +51,44 @@ async function countFollows(request, path, field, accountId) {
     throw new Error("Invalid follow count");
   }
   return total;
+}
+
+async function listFollowing(request, path, accountId) {
+  const pageSize = 100;
+  const accountIds = new Set();
+  const usedCursors = new Set();
+  let cursor;
+
+  while (true) {
+    const queries = [
+      { method: "equal", attribute: "followerId", values: [accountId] },
+      { method: "limit", values: [pageSize] },
+      { method: "select", values: ["$id", "followingId"] },
+    ];
+    if (cursor) queries.push({ method: "cursorAfter", values: [cursor] });
+
+    const params = new URLSearchParams(
+      queries.map((query, index) => [`queries[${index}]`, JSON.stringify(query)])
+    );
+    const response = await request(`${path}?${params}`);
+    if (!response.ok) throw new Error("Could not list follows");
+
+    const { documents } = await response.json();
+    if (!Array.isArray(documents)) throw new Error("Invalid follows page");
+
+    for (const record of documents) {
+      if (!isId(record?.followingId)) throw new Error("Invalid follow account ID");
+      accountIds.add(record.followingId);
+    }
+
+    if (documents.length < pageSize) return [...accountIds];
+
+    cursor = documents.at(-1)?.$id;
+    if (!isId(cursor) || usedCursors.has(cursor)) {
+      throw new Error("Invalid follows cursor");
+    }
+    usedCursors.add(cursor);
+  }
 }
 
 async function getFollow(request, path, followerId, followingId) {
@@ -120,6 +159,11 @@ export default async function handler({ req, res, error }) {
     if (!session.ok) throw new Error("Could not verify the session");
     const { $id: followerId } = await session.json();
     if (!isId(followerId)) throw new Error("Invalid session response");
+
+    if (body.action === "listFollowing") {
+      const accountIds = await listFollowing(request, follows, followerId);
+      return res.json({ accountIds });
+    }
 
     const targetResponse = await request(
       `${collections}/${encodeURIComponent(usersCollectionId)}/documents/${encodeURIComponent(body.targetId)}`

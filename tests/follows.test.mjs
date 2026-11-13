@@ -74,17 +74,26 @@ function setup(t) {
       return Response.json({ $id: documentId, ...data }, { status: 201 });
     }
     if (url.pathname === follows) {
-      const filter = JSON.parse(url.searchParams.get("queries[0]"));
+      const queries = [...url.searchParams.values()].map((query) => JSON.parse(query));
+      const [filter, limit, select, cursor] = queries;
       assert.equal(filter.method, "equal");
       assert.ok(["followerId", "followingId"].includes(filter.attribute));
-      assert.deepEqual(JSON.parse(url.searchParams.get("queries[1]")), {
-        method: "limit",
-        values: [1],
-      });
-      const matches = [...records.values()].filter(
-        (record) => record[filter.attribute] === filter.values[0]
-      );
-      return Response.json({ total: matches.length, documents: matches.slice(0, 1) });
+      assert.equal(limit.method, "limit");
+      const matches = [...records]
+        .filter(([, record]) => record[filter.attribute] === filter.values[0])
+        .map(([id, record]) => ({ $id: id, ...record }));
+      let start = 0;
+      if (cursor) {
+        assert.equal(cursor.method, "cursorAfter");
+        start = matches.findIndex((record) => record.$id === cursor.values[0]) + 1;
+        assert.ok(start > 0);
+      }
+      let page = matches.slice(start, start + limit.values[0]);
+      if (select) {
+        assert.deepEqual(select, { method: "select", values: ["$id", "followingId"] });
+        page = page.map(({ $id, followingId }) => ({ $id, followingId }));
+      }
+      return Response.json({ total: matches.length, documents: page });
     }
     if (url.pathname.startsWith(`${follows}/`)) {
       const id = url.pathname.split("/").at(-1);
@@ -194,4 +203,39 @@ test("upstream failures return a sanitized error instead of a fabricated status"
   });
   assert.ok(log.length > 0);
   assert.ok(log.every((message) => !message.includes(apiKey)));
+});
+
+test("listing follows uses the verified account and returns IDs across cursor pages", async (t) => {
+  const { records, calls, invoke } = setup(t);
+  const accountIds = Array.from({ length: 103 }, (_, index) => `followed-${index}`);
+  for (const [index, followingId] of accountIds.entries()) {
+    records.set(`edge-${index}`, { followerId: actorAccount, followingId });
+  }
+  records.set("someone-else", { followerId: "other-account", followingId: "private-account" });
+  records.set("duplicate", { followerId: actorAccount, followingId: accountIds[0] });
+
+  const result = await invoke({
+    action: "listFollowing",
+    followerId: "other-account",
+    targetId: targetProfile,
+  });
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.data, { accountIds });
+  assert.deepEqual(calls.map(({ url }) => url.pathname), ["/v1/account", follows, follows]);
+  assert.deepEqual(JSON.parse(calls[2].url.searchParams.get("queries[3]")), {
+    method: "cursorAfter",
+    values: ["edge-99"],
+  });
+});
+
+test("listing follows returns an empty list or rejects an unauthorized session", async (t) => {
+  const { calls, invoke } = setup(t);
+  const action = { action: "listFollowing" };
+  assert.deepEqual(await invoke(action, { token: "forged" }), {
+    status: 401,
+    data: { error: "Sign in to use follows." },
+  });
+  assert.deepEqual(calls.map(({ url }) => url.pathname), ["/v1/account"]);
+  assert.deepEqual(await invoke(action), { status: 200, data: { accountIds: [] } });
 });

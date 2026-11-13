@@ -364,6 +364,93 @@ export async function getUserPosts(userId?: string) {
   return withFileViewUrls(posts);
 }
 
+const followingBatchSize = 25;
+const followingPageSize = 10;
+
+function followingBatches<T>(values: readonly T[]): T[][] {
+  const batches: T[][] = [];
+  for (let offset = 0; offset < values.length; offset += followingBatchSize) {
+    batches.push(values.slice(offset, offset + followingBatchSize));
+  }
+  return batches;
+}
+
+export async function getFollowingCreatorIds(accountIds: readonly string[]) {
+  const groups = await Promise.all(followingBatches(accountIds).map(async (batch) => {
+    const ids: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const queries = [
+        Query.equal("accountId", batch),
+        Query.select(["$id"]),
+        Query.limit(100),
+      ];
+      if (cursor) queries.push(Query.cursorAfter(cursor));
+      const { documents } = await databases.listDocuments(
+        appwriteConfig.databaseId,
+        appwriteConfig.userCollectionId,
+        queries
+      );
+      ids.push(...documents.map(({ $id }) => $id));
+      cursor = documents.length === 100 ? documents.at(-1)?.$id : undefined;
+    } while (cursor);
+    return ids;
+  }));
+  return [...new Set(groups.flat())].sort();
+}
+
+type FollowingCursor = string | null | false;
+
+export async function getFollowingPosts(
+  creatorIds: readonly string[],
+  cursors: FollowingCursor[] | null
+) {
+  const batches = followingBatches(creatorIds);
+  const nextCursors = batches.map((_, index) => cursors?.[index] ?? null);
+  const pages = await Promise.all(batches.map(async (ids, index) => {
+    const cursor = nextCursors[index];
+    if (cursor === false) return [];
+    const queries = [
+      Query.equal("creator", ids),
+      Query.orderDesc("$createdAt"),
+      Query.orderDesc("$id"),
+      Query.limit(followingPageSize),
+    ];
+    if (cursor) queries.push(Query.cursorAfter(cursor));
+    const { documents } = await databases.listDocuments(
+      appwriteConfig.databaseId,
+      appwriteConfig.postCollectionId,
+      queries
+    );
+    return documents;
+  }));
+
+  const ranked = pages.flatMap((posts, index) => posts.map((post) => ({ post, index })));
+  ranked.sort((left, right) => {
+    if (left.post.$createdAt !== right.post.$createdAt) {
+      return left.post.$createdAt > right.post.$createdAt ? -1 : 1;
+    }
+    if (left.post.$id === right.post.$id) return 0;
+    return left.post.$id > right.post.$id ? -1 : 1;
+  });
+  const visible = ranked.slice(0, followingPageSize);
+  const consumed = batches.map(() => 0);
+  for (const { post, index } of visible) {
+    nextCursors[index] = post.$id;
+    consumed[index]++;
+  }
+  pages.forEach((posts, index) => {
+    if (posts.length < followingPageSize && consumed[index] === posts.length) {
+      nextCursors[index] = false;
+    }
+  });
+
+  return {
+    documents: withFileViewUrls(visible.map(({ post }) => post)),
+    nextCursors: nextCursors.some((cursor) => cursor !== false) ? nextCursors : undefined,
+  };
+}
+
 // ============================== GET POPULAR POSTS (BY HIGHEST LIKE COUNT)
 export async function getRecentPosts() {
   try {

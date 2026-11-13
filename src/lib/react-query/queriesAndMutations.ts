@@ -24,10 +24,14 @@ import {
   updateUser,
   getRecentPosts,
   getInfinitePosts,
+  getFollowingCreatorIds,
+  getFollowingPosts,
   searchPosts,
   savePost,
   deleteSavedPost,
 } from "@/lib/appwrite/api";
+import { listFollowingAccounts } from "@/lib/appwrite/follows";
+import { useUserContext } from "@/context/AuthContext";
 import { INewPost, INewUser, IUpdatePost, IUpdateUser } from "@/types";
 import { relationshipDocuments, relationshipId } from "@/lib/appwrite/relationships";
 
@@ -43,6 +47,7 @@ function retryDocumentRequest(failureCount: number, error: Error) {
 function invalidatePostLists(queryClient: QueryClient) {
   return Promise.all([
     QUERY_KEYS.GET_RECENT_POSTS,
+    QUERY_KEYS.GET_FOLLOWING_POSTS,
     QUERY_KEYS.GET_INFINITE_POSTS,
     QUERY_KEYS.GET_USER_POSTS,
     QUERY_KEYS.SEARCH_POSTS,
@@ -91,6 +96,36 @@ export const useGetPosts = () => {
     retry: retryDocumentRequest,
   });
 };
+
+export function useGetFollowingPosts(enabled: boolean) {
+  const { user, isAuthenticated } = useUserContext();
+  const active = enabled && isAuthenticated && !!user.id;
+
+  const creators = useQuery({
+    queryKey: [QUERY_KEYS.GET_FOLLOWING_CREATORS, user.id],
+    queryFn: async () => getFollowingCreatorIds(await listFollowingAccounts()),
+    enabled: active,
+    retry: retryDocumentRequest,
+  });
+
+  const posts = useInfiniteQuery({
+    queryKey: [QUERY_KEYS.GET_FOLLOWING_POSTS, user.id, creators.data],
+    queryFn: ({ pageParam }) => getFollowingPosts(creators.data ?? [], pageParam),
+    initialPageParam: null as Parameters<typeof getFollowingPosts>[1],
+    getNextPageParam: (lastPage) => lastPage.nextCursors,
+    enabled: active && creators.isSuccess && !creators.isFetching,
+    retry: retryDocumentRequest,
+  });
+
+  return {
+    ...posts,
+    data: creators.isFetching || creators.isError ? undefined : posts.data,
+    isLoading: active && (creators.isPending || creators.isFetching || posts.isLoading),
+    isError: creators.isError || posts.isError,
+    isFetching: creators.isFetching || posts.isFetching,
+    refetch: () => (creators.isError ? creators.refetch() : posts.refetch()),
+  };
+}
 
 export const useSearchPosts = (searchTerm: string) => {
   return useQuery({

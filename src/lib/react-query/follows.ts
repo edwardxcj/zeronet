@@ -1,5 +1,6 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { QUERY_KEYS } from "./queryKeys";
 import { useUserContext } from "@/context/AuthContext";
 import { getFollow, setFollow, type FollowState } from "@/lib/appwrite/follows";
 
@@ -49,6 +50,9 @@ export function useSetFollow(targetId: string) {
         readKey(user.id, targetId, true),
         (previous) => previous && { ...previous, following }
       );
+      await queryClient.invalidateQueries({
+        queryKey: [QUERY_KEYS.GET_FOLLOWING_CREATORS, user.id],
+      });
     },
     onSettled: () =>
       Promise.all([
