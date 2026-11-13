@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { LikedPosts } from "@/_root/pages";
 import { useUserContext } from "@/context/AuthContext";
 import { useGetUserById } from "@/lib/react-query/queriesAndMutations";
+import { useGetFollow } from "@/lib/react-query/follows";
+import FollowButton from "@/components/shared/FollowButton";
 import Loader from "@/components/shared/Loader";
 import GridPostList from "@/components/shared/GridPostList";
 import { relationshipDocuments } from "@/lib/appwrite/relationships";
@@ -33,6 +35,7 @@ const Profile = () => {
   const { pathname } = useLocation();
 
   const { data: currentUser, isLoading, refetch } = useGetUserById(id || "");
+  const follow = useGetFollow(currentUser?.$id, true);
 
   if (isLoading)
     return (
@@ -52,6 +55,7 @@ const Profile = () => {
   }
 
   const posts = relationshipDocuments(currentUser.posts);
+  const counts = follow.data?.counts;
 
   return (
     <div className="profile-container">
@@ -76,9 +80,20 @@ const Profile = () => {
 
             <div className="flex gap-8 mt-10 items-center justify-center xl:justify-start flex-wrap z-20">
               <StatBlock value={posts.length} label="Posts" />
-              <StatBlock value={20} label="Followers" />
-              <StatBlock value={20} label="Following" />
+              <StatBlock value={counts?.followers ?? "—"} label="Followers" />
+              <StatBlock value={counts?.following ?? "—"} label="Following" />
             </div>
+            {follow.isError && !counts && currentUser.$id === user.id && (
+              <Button
+                type="button"
+                variant="ghost"
+                className="self-center xl:self-start mt-2 text-light-3"
+                disabled={follow.isFetching}
+                onClick={() => void follow.refetch()}
+              >
+                Retry loading follow counts
+              </Button>
+            )}
 
             <p className="small-medium md:base-medium text-center xl:text-left mt-7 max-w-screen-sm">
               {currentUser.bio}
@@ -104,11 +119,7 @@ const Profile = () => {
                 </p>
               </Link>
             </div>
-            <div className={`${user.id === id && "hidden"}`}>
-              <Button type="button" className="shad-button_primary px-8">
-                Follow
-              </Button>
-            </div>
+            <FollowButton targetId={currentUser.$id} status={follow} className="px-8" />
           </div>
         </div>
       </div>

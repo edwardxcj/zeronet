@@ -1,0 +1,8 @@
+{
+  "name": "zeronet-follows",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  }
+}

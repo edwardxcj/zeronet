@@ -65,12 +65,13 @@ Open the local URL printed by Vite. To deploy your own instance on Vercel, confi
 | `npm run dev` | Start the Vite development server |
 | `npm run build` | Type-check and build the site into `dist/` |
 | `npm run preview` | Preview the production build locally |
-| `npm test` | Run the image URL regression tests |
+| `npm test` | Run the regression tests |
 
 <details>
 <summary>Implementation notes</summary>
 
 - Images are served from Appwrite Storage using original file URLs. The client converts older preview links when reading existing posts and avatars.
-- The Follow controls are UI placeholders. Profiles can fail to render when a post has missing likes data.
+- Profiles show follower and following totals from persisted follow records. The follow button is available on profiles and user cards.
+- To enable follows on your own Appwrite project, create a private table named `Follows` with ID `follows`, no client permissions, and indexed `followerId` and `followingId` columns (both VARCHAR, length 36). Deploy `functions/follows` as the Node.js function `zeronet-follows`, with entrypoint `src/main.js`, execution restricted to signed-in users, and row read and write scopes. Set `FOLLOWS_DATABASE_ID` and `FOLLOWS_USERS_COLLECTION_ID` in the function environment.
 
 </details>
