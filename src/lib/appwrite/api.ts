@@ -4,6 +4,7 @@ import { appwriteConfig, account, databases, storage, avatars } from "./config";
 import { IUpdatePost, INewPost, INewUser, IUpdateUser } from "@/types";
 import { normalizeImageUrls } from "./imageUrls";
 import { relationshipIds } from "./relationships";
+import { SignupProfileError } from "../authErrors";
 
 function withFileViewUrls<T>(value: T): T {
   return normalizeImageUrls(value, appwriteConfig.url);
@@ -15,30 +16,25 @@ function withFileViewUrls<T>(value: T): T {
 
 // ============================== SIGN UP
 export async function createUserAccount(user: INewUser) {
+  const newAccount = await account.create(
+    ID.unique(),
+    user.email,
+    user.password,
+    user.name
+  );
+
   try {
-    const newAccount = await account.create(
-      ID.unique(),
-      user.email,
-      user.password,
-      user.name
-    );
-
-    if (!newAccount) throw Error;
-
+    await account.createEmailSession(user.email, user.password);
     const avatarUrl = avatars.getInitials(user.name);
-
-    const newUser = await saveUserToDB({
+    return await saveUserToDB({
       accountId: newAccount.$id,
       name: newAccount.name,
       email: newAccount.email,
       username: user.username,
       imageUrl: avatarUrl,
     });
-
-    return newUser;
-  } catch (error) {
-    console.log(error);
-    return error;
+  } catch {
+    throw new SignupProfileError(newAccount.$id);
   }
 }
 
@@ -50,40 +46,100 @@ export async function saveUserToDB(user: {
   imageUrl: URL;
   username?: string;
 }) {
-  try {
-    const newUser = await databases.createDocument(
-      appwriteConfig.databaseId,
-      appwriteConfig.userCollectionId,
-      ID.unique(),
-      user
-    );
+  const newUser = await databases.createDocument(
+    appwriteConfig.databaseId,
+    appwriteConfig.userCollectionId,
+    user.accountId,
+    user
+  );
 
-    return withFileViewUrls(newUser);
+  return withFileViewUrls(newUser);
+}
+
+// A created account can finish its profile after an interrupted sign-up.
+export async function completeSignupProfile(
+  user: Pick<INewUser, "name" | "username">,
+  expectedAccountId?: string
+) {
+  const currentAccount = await account.get();
+  if (expectedAccountId && currentAccount.$id !== expectedAccountId) {
+    throw new Error("The signed-in account changed.");
+  }
+  const existing = await databases.listDocuments(
+    appwriteConfig.databaseId,
+    appwriteConfig.userCollectionId,
+    [Query.equal("accountId", currentAccount.$id), Query.limit(1)]
+  );
+  if (existing.documents[0]) return withFileViewUrls(existing.documents[0]);
+
+  try {
+    return await saveUserToDB({
+      accountId: currentAccount.$id,
+      name: user.name,
+      email: currentAccount.email,
+      username: user.username,
+      imageUrl: avatars.getInitials(user.name),
+    });
   } catch (error) {
-    console.log(error);
+    // A retry may follow a successful write whose response did not arrive.
+    if (error && typeof error === "object" && "code" in error && error.code === 409) {
+      const saved = await databases.getDocument(
+        appwriteConfig.databaseId,
+        appwriteConfig.userCollectionId,
+        currentAccount.$id
+      );
+      if (saved.accountId === currentAccount.$id) return withFileViewUrls(saved);
+    }
+    throw error;
   }
 }
 
 // ============================== SIGN IN
 export async function signInAccount(user: { email: string; password: string }) {
   try {
-    const session = await account.createEmailSession(user.email, user.password);
-
-    return session;
+    return await account.createEmailSession(user.email, user.password);
   } catch (error) {
-    console.log(error);
+    if (
+      error &&
+      typeof error === "object" &&
+      "type" in error &&
+      error.type === "user_session_already_exists"
+    ) {
+      const currentAccount = await account.get();
+      if (currentAccount.email.toLowerCase() === user.email.toLowerCase()) {
+        return account.getSession("current");
+      }
+    }
+    throw error;
   }
+}
+
+export async function requestPasswordRecovery(email: string) {
+  try {
+    await account.createRecovery(
+      email,
+      new URL("/reset-password", window.location.origin).toString()
+    );
+  } catch (error) {
+    if (error && typeof error === "object" && "type" in error && error.type === "user_not_found") {
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function confirmPasswordRecovery(
+  userId: string,
+  secret: string,
+  password: string,
+  passwordAgain: string
+) {
+  return account.updateRecovery(userId, secret, password, passwordAgain);
 }
 
 // ============================== GET ACCOUNT
 export async function getAccount() {
-  try {
-    const currentAccount = await account.get();
-
-    return currentAccount;
-  } catch (error) {
-    console.log(error);
-  }
+  return account.get();
 }
 
 // ============================== GET USER

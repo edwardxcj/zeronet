@@ -1,6 +1,7 @@
+import { useEffect, useState } from "react";
 import * as z from "zod";
 import { useForm } from "react-hook-form";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import {
@@ -14,22 +15,27 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import Loader from "@/components/shared/Loader";
-import { useToast } from "@/components/ui/use-toast";
 
 import {
   useCreateUserAccount,
   useSignInAccount,
 } from "@/lib/react-query/queriesAndMutations";
-import { SignupValidation } from "@/lib/validation";
+import { CompleteProfileValidation, SignupValidation } from "@/lib/validation";
 import { useUserContext } from "@/context/AuthContext";
+import { completeSignupProfile, getAccount } from "@/lib/appwrite/api";
+import { authErrorMessage, SignupProfileError } from "@/lib/authErrors";
 
 const SignupForm = () => {
-  const { toast } = useToast();
   const navigate = useNavigate();
-  const { checkAuthUser, isLoading: isUserLoading } = useUserContext();
+  const [params] = useSearchParams();
+  const completeMode = params.get("complete") === "1";
+  const { checkAuthUser } = useUserContext();
+  const [createdAccountId, setCreatedAccountId] = useState<string>();
+  const [accountReady, setAccountReady] = useState(!completeMode);
+  const [submitError, setSubmitError] = useState("");
 
   const form = useForm<z.infer<typeof SignupValidation>>({
-    resolver: zodResolver(SignupValidation),
+    resolver: zodResolver(completeMode ? CompleteProfileValidation : SignupValidation),
     defaultValues: {
       name: "",
       username: "",
@@ -39,55 +45,75 @@ const SignupForm = () => {
   });
 
   // Queries
-  const { mutateAsync: createUserAccount, isPending: isCreatingAccount } =
+  const { mutateAsync: createUserAccount } =
     useCreateUserAccount();
-  const { mutateAsync: signInAccount, isPending: isSigningInUser } =
+  const { mutateAsync: signInAccount } =
     useSignInAccount();
 
-  // Handler
-  const handleSignup = async (user: z.infer<typeof SignupValidation>) => {
-    try {
-      const newUser = await createUserAccount(user);
-
-      if (!newUser) {
-        toast({ title: "Sign up failed. Please try again." });
-
-        return;
-      }
-
-      const session = await signInAccount({
-        email: user.email,
-        password: user.password,
+  useEffect(() => {
+    if (!completeMode) return;
+    setAccountReady(false);
+    let active = true;
+    void getAccount()
+      .then((currentAccount) => {
+        if (!active) return;
+        form.reset({
+          name: currentAccount.name ?? "",
+          username: "",
+          email: currentAccount.email,
+          password: "",
+        });
+        setAccountReady(true);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        const needsLogin =
+          error && typeof error === "object" && "code" in error && error.code === 401;
+        setSubmitError(
+          needsLogin
+            ? "Log in first to finish setting up your profile."
+            : authErrorMessage(error, "signin")
+        );
       });
+    return () => { active = false; };
+  }, [completeMode, form]);
 
-      if (!session) {
-        toast({ title: "Something went wrong. Please login your new account" });
-
-        navigate("/sign-in");
-
-        return;
+  const handleSignup = async (user: z.infer<typeof SignupValidation>) => {
+    setSubmitError("");
+    try {
+      if (completeMode) {
+        await completeSignupProfile(user);
+      } else if (createdAccountId) {
+        await signInAccount(user);
+        await completeSignupProfile(user, createdAccountId);
+      } else {
+        const newUser = await createUserAccount(user);
+        setCreatedAccountId(newUser.accountId);
       }
 
-      const isLoggedIn = await checkAuthUser();
-
-      if (isLoggedIn) {
-        form.reset();
-
+      if (await checkAuthUser()) {
         navigate("/");
       } else {
-        toast({ title: "Login failed. Please try again." });
-
-        return;
+        setSubmitError("Your account is ready, but your profile could not be loaded. Retry to continue.");
       }
     } catch (error) {
-      console.log({ error });
+      if (error instanceof SignupProfileError) {
+        setCreatedAccountId(error.accountId);
+      }
+      setSubmitError(authErrorMessage(error, "signup"));
     }
   };
 
   return (
     <Form {...form}>
-      <h1 className="auth-title" id="auth-title">Create your account</h1>
-      <p className="auth-intro">Enter your details to join ZeroNet.</p>
+      <h1 className="auth-title" id="auth-title">
+        {completeMode || createdAccountId ? "Finish your profile" : "Create your account"}
+      </h1>
+      <p className="auth-intro">
+        {completeMode || createdAccountId
+          ? "Choose how you appear on ZeroNet."
+          : "Enter your details to join ZeroNet."}
+      </p>
 
       <form
         onSubmit={form.handleSubmit(handleSignup)}
@@ -142,6 +168,7 @@ const SignupForm = () => {
                 <Input
                   type="email"
                   autoComplete="email"
+                  readOnly={completeMode || !!createdAccountId}
                   className="auth-input"
                   {...field}
                 />
@@ -151,7 +178,7 @@ const SignupForm = () => {
           )}
         />
 
-        <FormField
+        {!completeMode && <FormField
           control={form.control}
           name="password"
           render={({ field }) => (
@@ -168,19 +195,23 @@ const SignupForm = () => {
               <FormMessage className="auth-error" />
             </FormItem>
           )}
-        />
+        />}
 
+        {completeMode && !accountReady && !submitError && (
+          <p role="status" className="text-sm text-light-2">Loading your account...</p>
+        )}
+        {submitError && <p role="alert" className="auth-error text-sm">{submitError}</p>}
         <Button
           type="submit"
           className="auth-submit"
-          disabled={form.formState.isSubmitting}
+          disabled={form.formState.isSubmitting || !accountReady}
         >
-          {isCreatingAccount || isSigningInUser || isUserLoading ? (
+          {form.formState.isSubmitting ? (
             <div className="flex-center gap-2">
               <Loader /> Loading...
             </div>
           ) : (
-            "Sign up"
+            completeMode || createdAccountId ? "Finish profile" : "Sign up"
           )}
         </Button>
       </form>

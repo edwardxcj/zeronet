@@ -1,8 +1,8 @@
-import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { QUERY_KEYS } from "./queryKeys";
 import { useUserContext } from "@/context/AuthContext";
-import { getFollow, setFollow, type FollowState } from "@/lib/appwrite/follows";
+import { getFollow, setFollow, listConnections, type ConnectionDirection, type FollowState } from "@/lib/appwrite/follows";
 
 const pairKey = (viewerId: string, targetId?: string) =>
   ["follow", viewerId, targetId] as const;
@@ -56,6 +56,7 @@ export function useSetFollow(targetId: string) {
     },
     onSettled: () =>
       Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["connections"] }),
         queryClient.invalidateQueries({ queryKey }),
         queryClient.invalidateQueries({
           queryKey: readKey(user.id, user.id, true),
@@ -79,4 +80,16 @@ export function useSetFollow(targetId: string) {
       mutation.mutate(following, { onError });
     },
   };
+}
+
+export function useGetConnections(targetId: string, direction: ConnectionDirection) {
+  const { user, isAuthenticated } = useUserContext();
+  return useInfiniteQuery({
+    queryKey: ["connections", user.id, targetId, direction],
+    queryFn: ({ pageParam }) => listConnections(targetId, direction, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: isAuthenticated && !!user.id && !!targetId,
+    retry: false,
+  });
 }

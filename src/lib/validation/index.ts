@@ -31,6 +31,24 @@ export const SigninValidation = z.object({
     .min(8, { message: "Password must be at least 8 characters." }),
 });
 
+export const CompleteProfileValidation = SignupValidation.extend({
+  password: z.string(),
+});
+
+export const ForgotPasswordValidation = z.object({
+  email: z.string().trim().email(),
+});
+
+export const ResetPasswordValidation = z
+  .object({
+    password: z.string().min(8, { message: "Use at least 8 characters." }),
+    passwordAgain: z.string(),
+  })
+  .refine((value) => value.password === value.passwordAgain, {
+    path: ["passwordAgain"],
+    message: "Passwords must match.",
+  });
+
 export const ProfileValidation = z.object({
   file: PhotoFiles,
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),

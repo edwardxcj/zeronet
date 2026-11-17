@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Route,
   Routes,
@@ -12,6 +13,8 @@ import { LikedPosts } from "@/_root/pages";
 import { useUserContext } from "@/context/AuthContext";
 import { useGetUserById } from "@/lib/react-query/queriesAndMutations";
 import { useGetFollow } from "@/lib/react-query/follows";
+import FollowList from "@/components/shared/FollowList";
+import type { ConnectionDirection } from "@/lib/appwrite/follows";
 import FollowButton from "@/components/shared/FollowButton";
 import Loader from "@/components/shared/Loader";
 import GridPostList from "@/components/shared/GridPostList";
@@ -20,19 +23,33 @@ import { relationshipDocuments } from "@/lib/appwrite/relationships";
 interface StabBlockProps {
   value: string | number;
   label: string;
+  onClick?: () => void;
 }
 
-const StatBlock = ({ value, label }: StabBlockProps) => (
-  <div className="flex-center gap-2">
-    <p className="small-semibold lg:body-bold text-primary-500">{value}</p>
-    <p className="small-medium lg:base-medium text-light-2">{label}</p>
-  </div>
-);
+const StatBlock = ({ value, label, onClick }: StabBlockProps) => {
+  const content = (
+    <>
+      <span className="small-semibold lg:body-bold text-primary-500">{value}</span>
+      <span className="small-medium lg:base-medium text-light-2">{label}</span>
+    </>
+  );
+  return onClick ? (
+    <button
+      type="button"
+      className="flex-center gap-2 rounded-md hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500"
+      aria-label={`${value} ${label}. View list`}
+      onClick={onClick}
+    >
+      {content}
+    </button>
+  ) : <div className="flex-center gap-2">{content}</div>;
+};
 
 const Profile = () => {
   const { id } = useParams();
   const { user } = useUserContext();
   const { pathname } = useLocation();
+  const [connections, setConnections] = useState<ConnectionDirection | null>(null);
 
   const { data: currentUser, isLoading, refetch } = useGetUserById(id || "");
   const follow = useGetFollow(currentUser?.$id, true);
@@ -80,8 +97,8 @@ const Profile = () => {
 
             <div className="flex gap-8 mt-10 items-center justify-center xl:justify-start flex-wrap z-20">
               <StatBlock value={posts.length} label="Posts" />
-              <StatBlock value={counts?.followers ?? "—"} label="Followers" />
-              <StatBlock value={counts?.following ?? "—"} label="Following" />
+              <StatBlock value={counts?.followers ?? "—"} label="Followers" onClick={() => setConnections("followers")} />
+              <StatBlock value={counts?.following ?? "—"} label="Following" onClick={() => setConnections("following")} />
             </div>
             {follow.isError && !counts && currentUser.$id === user.id && (
               <Button
@@ -173,6 +190,14 @@ const Profile = () => {
         )}
       </Routes>
       <Outlet />
+      {connections && (
+        <FollowList
+          key={`${currentUser.$id}:${connections}`}
+          targetId={currentUser.$id}
+          direction={connections}
+          onClose={() => setConnections(null)}
+        />
+      )}
     </div>
   );
 };

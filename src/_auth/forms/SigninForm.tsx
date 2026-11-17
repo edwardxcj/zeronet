@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -14,16 +15,17 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import Loader from "@/components/shared/Loader";
-import { useToast } from "@/components/ui/use-toast";
 
 import { SigninValidation } from "@/lib/validation";
 import { useSignInAccount } from "@/lib/react-query/queriesAndMutations";
 import { useUserContext } from "@/context/AuthContext";
+import { authErrorMessage } from "@/lib/authErrors";
 
 const SigninForm = () => {
-  const { toast } = useToast();
   const navigate = useNavigate();
-  const { checkAuthUser, isLoading: isUserLoading } = useUserContext();
+  const { checkAuthUser } = useUserContext();
+  const [submitError, setSubmitError] = useState("");
+  const [needsProfile, setNeedsProfile] = useState(false);
 
   // Query
   const { mutateAsync: signInAccount } = useSignInAccount();
@@ -37,24 +39,18 @@ const SigninForm = () => {
   });
 
   const handleSignin = async (user: z.infer<typeof SigninValidation>) => {
-    const session = await signInAccount(user);
-
-    if (!session) {
-      toast({ title: "Login failed. Please try again." });
-
-      return;
-    }
-
-    const isLoggedIn = await checkAuthUser();
-
-    if (isLoggedIn) {
-      form.reset();
-
-      navigate("/");
-    } else {
-      toast({ title: "Login failed. Please try again." });
-
-      return;
+    setSubmitError("");
+    setNeedsProfile(false);
+    try {
+      await signInAccount(user);
+      if (await checkAuthUser()) {
+        navigate("/");
+        return;
+      }
+      setSubmitError("You are signed in, but your profile could not be loaded. Retry or finish your profile.");
+      setNeedsProfile(true);
+    } catch (error) {
+      setSubmitError(authErrorMessage(error, "signin"));
     }
   };
 
@@ -105,12 +101,28 @@ const SigninForm = () => {
           )}
         />
 
+        <Link
+          to="/forgot-password"
+          className="text-sm text-[#c2b9ff] underline-offset-4 hover:underline"
+        >
+          Forgot password?
+        </Link>
+        {submitError && (
+          <p role="alert" className="auth-error text-sm">
+            {submitError}{" "}
+            {needsProfile && (
+              <Link to="/sign-up?complete=1" className="underline">
+                Finish your profile
+              </Link>
+            )}
+          </p>
+        )}
         <Button
           type="submit"
           className="auth-submit"
           disabled={form.formState.isSubmitting}
         >
-          {isUserLoading ? (
+          {form.formState.isSubmitting ? (
             <div className="flex-center gap-2">
               <Loader /> Loading...
             </div>

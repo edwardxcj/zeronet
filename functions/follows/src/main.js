@@ -18,6 +18,13 @@ function readRequest(req) {
     const body = req.bodyJson ?? JSON.parse(req.bodyText ?? req.body ?? "");
     if (!body || typeof body !== "object") return null;
     if (body.action === "listFollowing") return body;
+    if (body.action === "listConnections") {
+      return (
+        isId(body.targetId) &&
+        ["followers", "following"].includes(body.direction) &&
+        (body.cursor === undefined || isId(body.cursor))
+      ) ? body : null;
+    }
 
     if (
       !isId(body.targetId) ||
@@ -89,6 +96,71 @@ async function listFollowing(request, path, accountId) {
     }
     usedCursors.add(cursor);
   }
+}
+
+async function listConnections(request, followsPath, usersPath, accountId, direction, cursor) {
+  const pageSize = 20;
+  const filterField = direction === "followers" ? "followingId" : "followerId";
+  const connectionField = direction === "followers" ? "followerId" : "followingId";
+  const queries = [
+    { method: "equal", attribute: filterField, values: [accountId] },
+    { method: "limit", values: [pageSize] },
+    { method: "select", values: ["$id", connectionField] },
+    { method: "orderAsc", attribute: "$id" },
+  ];
+  if (cursor) queries.push({ method: "cursorAfter", values: [cursor] });
+
+  const parameters = new URLSearchParams(
+    queries.map((query, index) => [`queries[${index}]`, JSON.stringify(query)])
+  );
+  const response = await request(`${followsPath}?${parameters}`);
+  if (!response.ok) throw new Error("Could not list connections");
+  const { documents: edges } = await response.json();
+  if (!Array.isArray(edges)) throw new Error("Invalid connections page");
+
+  const accountIds = [];
+  for (const edge of edges) {
+    if (!isId(edge?.$id) || !isId(edge[connectionField])) {
+      throw new Error("Invalid connection");
+    }
+    accountIds.push(edge[connectionField]);
+  }
+  const nextCursor = edges.length === pageSize ? edges.at(-1).$id : null;
+  if (nextCursor !== null && nextCursor === cursor) {
+    throw new Error("Invalid connections cursor");
+  }
+  if (accountIds.length === 0) return { profiles: [], nextCursor: null };
+
+  const profileQueries = [
+    { method: "equal", attribute: "accountId", values: [...new Set(accountIds)] },
+    { method: "limit", values: [pageSize] },
+    {
+      method: "select",
+      values: ["$id", "accountId", "name", "username", "imageUrl"],
+    },
+  ];
+  const profileParameters = new URLSearchParams(
+    profileQueries.map((query, index) => [`queries[${index}]`, JSON.stringify(query)])
+  );
+  const profileResponse = await request(`${usersPath}?${profileParameters}`);
+  if (!profileResponse.ok) throw new Error("Could not load connection profiles");
+  const { documents } = await profileResponse.json();
+  if (!Array.isArray(documents)) throw new Error("Invalid connection profiles");
+
+  const profilesByAccount = new Map();
+  for (const profile of documents) {
+    if (!isId(profile?.$id) || !accountIds.includes(profile.accountId)) continue;
+    profilesByAccount.set(profile.accountId, {
+      $id: profile.$id,
+      name: typeof profile.name === "string" ? profile.name : "ZeroNet member",
+      username: typeof profile.username === "string" ? profile.username : "",
+      imageUrl: typeof profile.imageUrl === "string" ? profile.imageUrl : "",
+    });
+  }
+  const profiles = [...new Set(accountIds)]
+    .map((id) => profilesByAccount.get(id))
+    .filter(Boolean);
+  return { profiles, nextCursor };
 }
 
 async function getFollow(request, path, followerId, followingId) {
@@ -175,6 +247,18 @@ export default async function handler({ req, res, error }) {
     if (!targetResponse.ok) throw new Error("Could not read the target profile");
     const followingId = target.accountId;
     if (!isId(followingId)) return fail(404, "Profile not found.");
+
+    if (body.action === "listConnections") {
+      const connections = await listConnections(
+        request,
+        follows,
+        `${collections}/${encodeURIComponent(usersCollectionId)}/documents`,
+        followingId,
+        body.direction,
+        body.cursor
+      );
+      return res.json(connections);
+    }
 
     const documentId = pairId(followerId, followingId);
     const followPath = `${follows}/${documentId}`;

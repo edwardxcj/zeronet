@@ -63,6 +63,17 @@ function setup(t) {
         ? Response.json(profile)
         : Response.json(absent, { status: 404 });
     }
+    if (url.pathname === `${documents}/test-users/documents`) {
+      const queries = [...url.searchParams.values()].map((query) => JSON.parse(query));
+      const filter = queries.find((query) => query.method === "equal");
+      const selection = queries.find((query) => query.method === "select");
+      assert.equal(filter.attribute, "accountId");
+      assert.deepEqual(selection.values, ["$id", "accountId", "name", "username", "imageUrl"]);
+      const matches = [...profiles]
+        .filter(([, profile]) => filter.values.includes(profile.accountId))
+        .map(([id, profile]) => ({ $id: id, ...profile }));
+      return Response.json({ total: matches.length, documents: matches });
+    }
     if (url.pathname === follows && method === "POST") {
       const { documentId, data, permissions } = JSON.parse(init.body);
       assert.deepEqual(permissions, []);
@@ -75,13 +86,21 @@ function setup(t) {
     }
     if (url.pathname === follows) {
       const queries = [...url.searchParams.values()].map((query) => JSON.parse(query));
-      const [filter, limit, select, cursor] = queries;
+      const filter = queries.find((query) => query.method === "equal");
+      const limit = queries.find((query) => query.method === "limit");
+      const select = queries.find((query) => query.method === "select");
+      const cursor = queries.find((query) => query.method === "cursorAfter");
+      const order = queries.find((query) => query.method === "orderAsc");
       assert.equal(filter.method, "equal");
       assert.ok(["followerId", "followingId"].includes(filter.attribute));
       assert.equal(limit.method, "limit");
       const matches = [...records]
         .filter(([, record]) => record[filter.attribute] === filter.values[0])
         .map(([id, record]) => ({ $id: id, ...record }));
+      if (order) {
+        assert.equal(order.attribute, "$id");
+        matches.sort((left, right) => left.$id.localeCompare(right.$id));
+      }
       let start = 0;
       if (cursor) {
         assert.equal(cursor.method, "cursorAfter");
@@ -90,8 +109,11 @@ function setup(t) {
       }
       let page = matches.slice(start, start + limit.values[0]);
       if (select) {
-        assert.deepEqual(select, { method: "select", values: ["$id", "followingId"] });
-        page = page.map(({ $id, followingId }) => ({ $id, followingId }));
+        assert.ok(["followerId", "followingId"].includes(select.values[1]));
+        assert.equal(select.values[0], "$id");
+        page = page.map((record) =>
+          Object.fromEntries(select.values.map((field) => [field, record[field]]))
+        );
       }
       return Response.json({ total: matches.length, documents: page });
     }
@@ -238,4 +260,145 @@ test("listing follows returns an empty list or rejects an unauthorized session",
   });
   assert.deepEqual(calls.map(({ url }) => url.pathname), ["/v1/account"]);
   assert.deepEqual(await invoke(action), { status: 200, data: { accountIds: [] } });
+});
+
+test("connection lists resolve the target account and expose only public profiles", async (t) => {
+  const { records, profiles, calls, invoke } = setup(t);
+  profiles.set("member-profile", {
+    accountId: "member-account",
+    name: "Member",
+    username: "member",
+    imageUrl: "https://images.example.test/avatar.png",
+    email: "private@example.test",
+    bio: "private field for this response",
+  });
+  profiles.set("incoming-profile", {
+    accountId: "incoming-account",
+    name: null,
+    username: null,
+    imageUrl: null,
+    email: "another-private@example.test",
+  });
+  records.set("outgoing", { followerId: targetAccount, followingId: "member-account" });
+  records.set("incoming", { followerId: "incoming-account", followingId: targetAccount });
+  records.set("unrelated", { followerId: actorAccount, followingId: "unrelated-account" });
+
+  assert.deepEqual(await invoke({
+    action: "listConnections",
+    targetId: targetProfile,
+    direction: "following",
+    accountId: actorAccount,
+  }), {
+    status: 200,
+    data: {
+      profiles: [{
+        $id: "member-profile",
+        name: "Member",
+        username: "member",
+        imageUrl: "https://images.example.test/avatar.png",
+      }],
+      nextCursor: null,
+    },
+  });
+  assert.deepEqual(await invoke({
+    action: "listConnections",
+    targetId: targetProfile,
+    direction: "followers",
+  }), {
+    status: 200,
+    data: {
+      profiles: [{
+        $id: "incoming-profile",
+        name: "ZeroNet member",
+        username: "",
+        imageUrl: "",
+      }],
+      nextCursor: null,
+    },
+  });
+  assert.ok(calls.every(({ method }) => method === "GET"));
+});
+
+test("connection pages advance by edges even when every profile on a page was deleted", async (t) => {
+  const { records, profiles, calls, invoke } = setup(t);
+  for (let index = 0; index < 21; index++) {
+    const suffix = index.toString().padStart(2, "0");
+    records.set(`edge-${suffix}`, {
+      followerId: `member-${suffix}`,
+      followingId: targetAccount,
+    });
+  }
+  profiles.set("surviving-profile", {
+    accountId: "member-20",
+    name: "Surviving member",
+    username: "survivor",
+    imageUrl: "",
+  });
+  const request = {
+    action: "listConnections",
+    targetId: targetProfile,
+    direction: "followers",
+  };
+  assert.deepEqual(await invoke(request), {
+    status: 200,
+    data: { profiles: [], nextCursor: "edge-19" },
+  });
+  assert.deepEqual(await invoke({ ...request, cursor: "edge-19" }), {
+    status: 200,
+    data: {
+      profiles: [{
+        $id: "surviving-profile",
+        name: "Surviving member",
+        username: "survivor",
+        imageUrl: "",
+      }],
+      nextCursor: null,
+    },
+  });
+  const edgeQueries = calls.filter(({ url }) => url.pathname === follows);
+  assert.equal(edgeQueries.length, 2);
+  assert.deepEqual(JSON.parse(edgeQueries[1].url.searchParams.get("queries[4]")), {
+    method: "cursorAfter",
+    values: ["edge-19"],
+  });
+});
+
+test("connection list validates direction and cursor before reading private data", async (t) => {
+  const { calls, invoke } = setup(t);
+  const request = {
+    action: "listConnections",
+    targetId: targetProfile,
+    direction: "followers",
+  };
+  for (const body of [
+    { ...request, direction: "both" },
+    { ...request, cursor: "../another-collection" },
+    { ...request, cursor: "" },
+    { ...request, targetId: "" },
+  ]) {
+    assert.deepEqual(await invoke(body), {
+      status: 400,
+      data: { error: "Invalid follow request." },
+    });
+  }
+  assert.equal(calls.length, 0);
+  assert.equal((await invoke(request, { token: "forged" })).status, 401);
+  assert.deepEqual(calls.map(({ url }) => url.pathname), ["/v1/account"]);
+});
+
+test("an empty connection list returns a terminal cursor without querying profiles", async (t) => {
+  const { calls, invoke } = setup(t);
+  assert.deepEqual(await invoke({
+    action: "listConnections",
+    targetId: targetProfile,
+    direction: "following",
+  }), {
+    status: 200,
+    data: { profiles: [], nextCursor: null },
+  });
+  assert.deepEqual(calls.map(({ url }) => url.pathname), [
+    "/v1/account",
+    `${documents}/test-users/documents/${targetProfile}`,
+    follows,
+  ]);
 });

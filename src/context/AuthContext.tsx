@@ -1,8 +1,9 @@
-import { matchPath, useLocation, useNavigate } from "react-router-dom";
-import { createContext, useContext, useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
 import { IUser } from "@/types";
 import { getCurrentUser } from "@/lib/appwrite/api";
+import { isAuthPath } from "@/lib/authErrors";
 
 export const INITIAL_USER = {
   id: "",
@@ -36,11 +37,15 @@ const AuthContext = createContext<IContextType>(INITIAL_STATE);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const currentPath = useRef(pathname);
+  const navigateRef = useRef(navigate);
+  currentPath.current = pathname;
+  navigateRef.current = navigate;
   const [user, setUser] = useState<IUser>(INITIAL_USER);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const checkAuthUser = async () => {
+  const checkAuthUser = useCallback(async () => {
     setIsLoading(true);
     try {
       const currentAccount = await getCurrentUser();
@@ -58,24 +63,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return true;
       }
 
+      setUser(INITIAL_USER);
+      setIsAuthenticated(false);
       return false;
     } catch (error) {
       console.error(error);
+      setUser(INITIAL_USER);
+      setIsAuthenticated(false);
       return false;
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    const cookieFallback = localStorage.getItem("cookieFallback");
-    const isAuthPage = matchPath("/sign-in", pathname) || matchPath("/sign-up", pathname);
-    if (!isAuthPage && (!cookieFallback || cookieFallback === "[]")) {
-      navigate("/sign-in", { replace: true });
-    }
-
-    checkAuthUser();
-  }, []);
+    let active = true;
+    void checkAuthUser().then((authenticated) => {
+      if (active && !authenticated && !isAuthPath(currentPath.current)) {
+        navigateRef.current("/sign-in", { replace: true });
+      }
+    });
+    return () => { active = false; };
+  }, [checkAuthUser]);
 
   const value = {
     user,

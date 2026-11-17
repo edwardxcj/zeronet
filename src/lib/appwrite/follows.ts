@@ -1,7 +1,8 @@
 import { AppwriteException, Functions } from "appwrite";
 import { z } from "zod";
 
-import { client } from "./config";
+import { appwriteConfig, client } from "./config";
+import { normalizeImageUrls } from "./imageUrls";
 
 const functions = new Functions(client);
 const followFunctionId = "zeronet-follows";
@@ -9,7 +10,13 @@ const followFunctionId = "zeronet-follows";
 type FollowRequest =
   | { action: "get"; targetId: string; includeCounts: boolean }
   | { action: "set"; targetId: string; following: boolean }
-  | { action: "listFollowing" };
+  | { action: "listFollowing" }
+  | {
+      action: "listConnections";
+      targetId: string;
+      direction: ConnectionDirection;
+      cursor?: string;
+    };
 
 const followResponse = z.object({
   following: z.boolean(),
@@ -66,4 +73,29 @@ const followingAccountsResponse = z.object({ accountIds: z.array(z.string()) });
 export async function listFollowingAccounts() {
   const response = await executeFollow({ action: "listFollowing" });
   return followingAccountsResponse.parse(response).accountIds;
+}
+
+export type ConnectionDirection = "followers" | "following";
+
+const connectionProfile = z.object({
+  $id: z.string(),
+  name: z.string(),
+  username: z.string(),
+  imageUrl: z.string(),
+});
+
+export type ConnectionProfile = z.infer<typeof connectionProfile>;
+
+const connectionsResponse = z.object({
+  profiles: z.array(connectionProfile),
+  nextCursor: z.string().nullish(),
+});
+
+export async function listConnections(
+  targetId: string,
+  direction: ConnectionDirection,
+  cursor?: string
+) {
+  const response = await executeFollow({ action: "listConnections", targetId, direction, cursor });
+  return normalizeImageUrls(connectionsResponse.parse(response), appwriteConfig.url);
 }
