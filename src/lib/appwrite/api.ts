@@ -158,8 +158,7 @@ export async function getCurrentUser() {
     if (!currentUser) throw Error;
 
     return withFileViewUrls(currentUser.documents[0] ?? null);
-  } catch (error) {
-    console.log(error);
+  } catch {
     return null;
   }
 }

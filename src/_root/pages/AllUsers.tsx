@@ -12,7 +12,7 @@ const pageSize = 12;
 const AllUsers = () => {
   const [searchValue, setSearchValue] = useState("");
   const [visibleLimit, setVisibleLimit] = useState(pageSize);
-  const searchTerm = searchValue.trim().normalize("NFKC").toLowerCase();
+  const searchTerm = searchValue.trim().normalize("NFKC").replace(/^@/, "").toLowerCase();
   const debouncedSearch = useDebounce(searchTerm, 350);
   const isDebouncing = searchTerm !== debouncedSearch;
   const {
@@ -72,7 +72,7 @@ const AllUsers = () => {
           <>
             {visiblePeople.length > 0 && (
               <p className="w-full text-light-3 small-regular" aria-live="polite">
-                Showing {visiblePeople.length} {debouncedSearch ? "matches" : "people"}
+                Showing {visiblePeople.length} {debouncedSearch ? (visiblePeople.length === 1 ? "match" : "matches") : "people"}
               </p>
             )}
             <ul className="user-grid">

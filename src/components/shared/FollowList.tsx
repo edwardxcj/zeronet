@@ -58,6 +58,14 @@ const FollowList = ({
   const profiles = list.data?.pages.flatMap((page) => page.profiles) ?? [];
   const uniqueProfiles = [...new Map(profiles.map((profile) => [profile.$id, profile])).values()];
   const title = direction === "followers" ? "Followers" : "Following";
+  const { fetchNextPage, hasNextPage, fetchStatus, isError } = list;
+  const isFindingProfiles = uniqueProfiles.length === 0 && !!hasNextPage && !isError;
+
+  useEffect(() => {
+    if (isFindingProfiles && fetchStatus === "idle") {
+      void fetchNextPage({ cancelRefetch: false });
+    }
+  }, [fetchNextPage, fetchStatus, isFindingProfiles]);
 
   useEffect(() => {
     const element = dialog.current;
@@ -90,7 +98,7 @@ const FollowList = ({
           </Button>
         </header>
         <div className="custom-scrollbar min-h-[120px] overflow-y-auto px-5 py-2">
-          {list.isPending ? (
+          {list.isPending || isFindingProfiles ? (
             <div className="flex-center py-8"><Loader /></div>
           ) : (
             <>

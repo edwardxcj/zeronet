@@ -32,6 +32,8 @@ const SignupForm = () => {
   const { checkAuthUser } = useUserContext();
   const [createdAccountId, setCreatedAccountId] = useState<string>();
   const [accountReady, setAccountReady] = useState(!completeMode);
+  const [accountLoadAttempt, setAccountLoadAttempt] = useState(0);
+  const [requiresLogin, setRequiresLogin] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
   const form = useForm<z.infer<typeof SignupValidation>>({
@@ -53,22 +55,23 @@ const SignupForm = () => {
   useEffect(() => {
     if (!completeMode) return;
     setAccountReady(false);
+    setSubmitError("");
+    setRequiresLogin(false);
     let active = true;
     void getAccount()
       .then((currentAccount) => {
         if (!active) return;
-        form.reset({
-          name: currentAccount.name ?? "",
-          username: "",
-          email: currentAccount.email,
-          password: "",
-        });
+        form.setValue("email", currentAccount.email);
+        if (!form.getFieldState("name").isDirty) {
+          form.setValue("name", currentAccount.name ?? "");
+        }
         setAccountReady(true);
       })
       .catch((error: unknown) => {
         if (!active) return;
         const needsLogin =
           error && typeof error === "object" && "code" in error && error.code === 401;
+        setRequiresLogin(!!needsLogin);
         setSubmitError(
           needsLogin
             ? "Log in first to finish setting up your profile."
@@ -76,7 +79,7 @@ const SignupForm = () => {
         );
       });
     return () => { active = false; };
-  }, [completeMode, form]);
+  }, [accountLoadAttempt, completeMode, form]);
 
   const handleSignup = async (user: z.infer<typeof SignupValidation>) => {
     setSubmitError("");
@@ -201,6 +204,21 @@ const SignupForm = () => {
           <p role="status" className="text-sm text-light-2">Loading your account...</p>
         )}
         {submitError && <p role="alert" className="auth-error text-sm">{submitError}</p>}
+        {completeMode && !accountReady && submitError && (
+          requiresLogin ? (
+            <Link to="/sign-in" className="text-sm text-[#c2b9ff] underline">
+              Log in to continue
+            </Link>
+          ) : (
+            <Button
+              type="button"
+              className="shad-button_dark_4"
+              onClick={() => setAccountLoadAttempt((attempt) => attempt + 1)}
+            >
+              Retry loading your account
+            </Button>
+          )
+        )}
         <Button
           type="submit"
           className="auth-submit"

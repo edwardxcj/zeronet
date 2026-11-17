@@ -50,6 +50,6 @@ export function authErrorMessage(
 
 export function isAuthPath(pathname: string): boolean {
   return ["/sign-in", "/sign-up", "/forgot-password", "/reset-password"].includes(
-    pathname.replace(/\/$/, "")
+    pathname.toLowerCase().replace(/\/+$/, "")
   );
 }

@@ -153,6 +153,9 @@ test("unknown recovery emails receive the same success state while transport err
 test("recovery pages remain public and new passwords must match", () => {
   assert.equal(isAuthPath("/forgot-password"), true);
   assert.equal(isAuthPath("/reset-password/"), true);
+  assert.equal(isAuthPath("/RESET-PASSWORD///"), true);
+  assert.equal(isAuthPath("/Forgot-Password//"), true);
+  assert.equal(isAuthPath("/SIGN-IN///"), true);
   assert.equal(isAuthPath("/profile/account-1"), false);
   assert.equal(isAuthPath("/reset-password/other"), false);
   assert.equal(ForgotPasswordValidation.safeParse({ email: " test@example.test " }).success, true);
@@ -165,3 +168,101 @@ test("recovery pages remain public and new passwords must match", () => {
   assert.equal(CompleteProfileValidation.safeParse(profile).success, true);
   assert.equal(SignupValidation.safeParse(profile).success, false);
 });
+
+test("guest session checks return null without logging expected authentication failures", async (t) => {
+  const log = t.mock.method(console, "log", () => {});
+  const api = await loadAuthApi(t, {
+    account: { get: async () => { throw { code: 401, type: "general_unauthorized_scope" }; } },
+  });
+  assert.equal(await api.getCurrentUser(), null);
+  assert.equal(log.mock.calls.length, 0);
+});
+
+async function authProviderFixture(t) {
+  const fixture = {
+    states: [],
+    pending: [],
+    navigations: [],
+    currentPath: "/",
+    getCurrentUser() {
+      return new Promise((resolve) => fixture.pending.push(resolve));
+    },
+  };
+  const key = `__zeronet_auth_provider_${fixtureId++}`;
+  globalThis[key] = fixture;
+  t.after(() => { fixture.cleanup?.(); delete globalThis[key]; });
+  const asModule = (source) =>
+    `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
+  const hooks = asModule(`
+    const fixture = globalThis[${JSON.stringify(key)}];
+    export const createContext = (initial) => ({ Provider: "auth-provider", initial });
+    export const useContext = (context) => context.initial;
+    export const useCallback = (callback) => callback;
+    export const useRef = (current) => ({ current });
+    export const useEffect = (callback) => { fixture.cleanup = callback(); };
+    export const useState = (initial) => {
+      const index = fixture.states.length;
+      fixture.states.push(initial);
+      return [initial, (value) => {
+        fixture.states[index] = typeof value === "function" ? value(fixture.states[index]) : value;
+      }];
+    };
+  `);
+  const router = asModule(`
+    const fixture = globalThis[${JSON.stringify(key)}];
+    export const useLocation = () => ({ pathname: fixture.currentPath });
+    export const useNavigate = () => (...args) => fixture.navigations.push(args);
+  `);
+  const api = asModule(`
+    const fixture = globalThis[${JSON.stringify(key)}];
+    export const getCurrentUser = () => fixture.getCurrentUser();
+  `);
+  const source = await readFile(new URL("../src/context/AuthContext.tsx", import.meta.url), "utf8");
+  const { outputText } = ts.transpileModule(source, {
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.ES2022,
+      jsx: ts.JsxEmit.ReactJSX,
+    },
+  });
+  const imports = {
+    react: hooks,
+    "react-router-dom": router,
+    "@/lib/appwrite/api": api,
+    "@/lib/authErrors": new URL("../src/lib/authErrors.ts", import.meta.url).href,
+    "react/jsx-runtime": new URL("../node_modules/react/jsx-runtime.js", import.meta.url).href,
+  };
+  const executable = outputText.replace(/from "([^"]+)"/g, (_match, specifier) => {
+    assert.ok(imports[specifier], `Unexpected auth provider import ${specifier}`);
+    return `from "${imports[specifier]}"`;
+  });
+  const { AuthProvider } = await import(asModule(executable));
+  const element = AuthProvider({ children: null });
+  fixture.checkAuthUser = element.props.value.checkAuthUser;
+  return fixture;
+}
+
+for (const guestFinishesFirst of [true, false]) {
+  test(`an initial guest check cannot override a newer login (${guestFinishesFirst ? "guest first" : "login first"})`, async (t) => {
+    const fixture = await authProviderFixture(t);
+    assert.equal(fixture.pending.length, 1);
+    const loginCheck = fixture.checkAuthUser();
+    const profile = { $id: "signed-in", name: "Test", username: "test", email: "test@example.test" };
+
+    if (guestFinishesFirst) {
+      fixture.pending[0](null);
+      await new Promise(setImmediate);
+      assert.equal(fixture.states[2], true);
+      assert.equal(fixture.navigations.length, 0);
+    }
+    fixture.pending[1](profile);
+    assert.equal(await loginCheck, true);
+    if (!guestFinishesFirst) fixture.pending[0](null);
+    await new Promise(setImmediate);
+
+    assert.equal(fixture.states[0].id, profile.$id);
+    assert.equal(fixture.states[1], true);
+    assert.equal(fixture.states[2], false);
+    assert.deepEqual(fixture.navigations, []);
+  });
+}

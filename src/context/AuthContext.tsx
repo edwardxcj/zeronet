@@ -39,6 +39,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
   const currentPath = useRef(pathname);
   const navigateRef = useRef(navigate);
+  const authRequest = useRef(0);
   currentPath.current = pathname;
   navigateRef.current = navigate;
   const [user, setUser] = useState<IUser>(INITIAL_USER);
@@ -46,9 +47,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const checkAuthUser = useCallback(async () => {
+    const request = ++authRequest.current;
     setIsLoading(true);
     try {
       const currentAccount = await getCurrentUser();
+      if (request !== authRequest.current) return false;
       if (currentAccount) {
         setUser({
           id: currentAccount.$id,
@@ -66,20 +69,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(INITIAL_USER);
       setIsAuthenticated(false);
       return false;
-    } catch (error) {
-      console.error(error);
-      setUser(INITIAL_USER);
-      setIsAuthenticated(false);
+    } catch {
+      if (request === authRequest.current) {
+        setUser(INITIAL_USER);
+        setIsAuthenticated(false);
+      }
       return false;
     } finally {
-      setIsLoading(false);
+      if (request === authRequest.current) setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
     let active = true;
+    const initialRequest = authRequest.current + 1;
     void checkAuthUser().then((authenticated) => {
-      if (active && !authenticated && !isAuthPath(currentPath.current)) {
+      if (
+        active &&
+        authRequest.current === initialRequest &&
+        !authenticated &&
+        !isAuthPath(currentPath.current)
+      ) {
         navigateRef.current("/sign-in", { replace: true });
       }
     });
