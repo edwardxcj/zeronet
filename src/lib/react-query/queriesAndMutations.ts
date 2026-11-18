@@ -201,6 +201,7 @@ export const useDeletePost = () => {
 export const useLikePost = () => {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: ["likePost"],
     mutationFn: ({
       postId,
       userId,
@@ -210,8 +211,13 @@ export const useLikePost = () => {
       userId: string;
       shouldLike: boolean;
     }) => likePost(postId, userId, shouldLike),
-    onSuccess: (data) => {
+    onSuccess: (data, { userId }) => {
+      queryClient.setQueryData(["postLikes", userId, data.$id], {
+        postId: data.$id,
+        likes: data.likes,
+      });
       void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.GET_POST_BY_ID, data.$id] });
+      void queryClient.invalidateQueries({ queryKey: ["postLikes", userId, data.$id] });
       void invalidatePostLists(queryClient);
     },
   });

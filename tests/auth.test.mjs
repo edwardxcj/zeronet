@@ -50,6 +50,9 @@ async function loadAuthApi(t, { account = {}, databases = {} } = {}) {
     export const { account, databases, avatars, storage, appwriteConfig } = config;
   `;
   const configUrl = `data:text/javascript;base64,${Buffer.from(configSource).toString("base64")}`;
+  const socialUrl = `data:text/javascript;base64,${Buffer.from(
+    'export function setPostLike() { throw new Error("Unexpected social call in an auth test"); }'
+  ).toString("base64")}`;
   const apiUrl = new URL("../src/lib/appwrite/api.ts", import.meta.url);
   const source = await readFile(apiUrl, "utf8");
   const { outputText } = ts.transpileModule(source, {
@@ -57,6 +60,7 @@ async function loadAuthApi(t, { account = {}, databases = {} } = {}) {
   });
   const executable = outputText.replace(/from "([^"]+)"/g, (_match, specifier) => {
     if (specifier === "./config") return `from "${configUrl}"`;
+    if (specifier === "./social") return `from "${socialUrl}"`;
     if (specifier === "appwrite") {
       return `from "${new URL("../node_modules/appwrite/dist/esm/sdk.js", import.meta.url)}"`;
     }

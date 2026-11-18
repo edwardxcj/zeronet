@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createSocialService, isSocialAction, validSocialRequest, SocialError, SocialUpstreamError } from "./social.js";
 
 const appwriteId = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,35}$/;
 
@@ -17,6 +18,7 @@ function readRequest(req) {
   try {
     const body = req.bodyJson ?? JSON.parse(req.bodyText ?? req.body ?? "");
     if (!body || typeof body !== "object") return null;
+    if (isSocialAction(body.action)) return validSocialRequest(body) ? body : null;
     if (body.action === "listFollowing") return body;
     if (body.action === "listConnections") {
       return (
@@ -197,6 +199,7 @@ export default async function handler({ req, res, error }) {
     APPWRITE_FUNCTION_PROJECT_ID: projectId,
     FOLLOWS_DATABASE_ID: databaseId,
     FOLLOWS_USERS_COLLECTION_ID: usersCollectionId,
+    SOCIAL_POSTS_COLLECTION_ID: postsCollectionId,
   } = process.env;
   const key = req.headers["x-appwrite-key"];
   if (!endpoint || !projectId || !databaseId || !usersCollectionId || !key) {
@@ -206,8 +209,8 @@ export default async function handler({ req, res, error }) {
 
   const base = endpoint.replace(/\/+$/, "");
   const headers = { "X-Appwrite-Project": projectId };
-  const request = (path, { method = "GET", data } = {}) =>
-    fetch(`${base}${path}`, {
+  const request = async (path, { method = "GET", data } = {}) => {
+    const response = await fetch(`${base}${path}`, {
       method,
       redirect: "error",
       headers: {
@@ -217,8 +220,18 @@ export default async function handler({ req, res, error }) {
       },
       body: data === undefined ? undefined : JSON.stringify(data),
     });
+    const resource = path.startsWith("/databases/transactions") ? "transactions"
+      : path.includes("/comments/documents") ? "comments"
+      : path.includes("/notifications/documents") ? "notifications"
+      : path.includes("/follows/documents") ? "follows" : "documents";
+    response.socialOperation = `${method} ${resource}`;
+    return response;
+  };
   const collections = `/databases/${encodeURIComponent(databaseId)}/collections`;
   const follows = `${collections}/follows/documents`;
+  const userRequest = (path) => fetch(`${base}${path}`, {
+    redirect: "error", headers: { ...headers, "X-Appwrite-JWT": jwt },
+  });
 
   try {
     const session = await fetch(`${base}/account`, {
@@ -231,6 +244,16 @@ export default async function handler({ req, res, error }) {
     if (!session.ok) throw new Error("Could not verify the session");
     const { $id: followerId } = await session.json();
     if (!isId(followerId)) throw new Error("Invalid session response");
+
+    const social = postsCollectionId ? createSocialService({
+      request, userRequest, collections,
+      usersPath: `${collections}/${encodeURIComponent(usersCollectionId)}/documents`,
+      postsCollectionId, actorId: followerId,
+    }) : null;
+    if (isSocialAction(body.action)) {
+      if (!social) throw new Error("Social configuration is incomplete");
+      return res.json(await social.dispatch(body));
+    }
 
     if (body.action === "listFollowing") {
       const accountIds = await listFollowing(request, follows, followerId);
@@ -265,6 +288,9 @@ export default async function handler({ req, res, error }) {
     const isSelf = followerId === followingId;
     if (body.action === "set") {
       if (isSelf) return fail(400, "You cannot follow yourself.");
+      if (social) return res.json(await social.setFollow({
+        following: body.following, followingId, followsPath: follows, documentId,
+      }));
 
       if (body.following) {
         const created = await request(follows, {
@@ -306,7 +332,11 @@ export default async function handler({ req, res, error }) {
       countFollows(request, follows, "followerId", followingId),
     ]);
     return res.json({ following, counts: { followers, following: followingCount } });
-  } catch {
+  } catch (cause) {
+    if (cause instanceof SocialError) return fail(cause.status, cause.message);
+    if (cause instanceof SocialUpstreamError) {
+      error?.(`Appwrite social failure: operation=${cause.operation}; status=${cause.status}; type=${cause.type}.`);
+    }
     error?.("An Appwrite operation failed while processing follows.");
     return fail(500, "Follows is temporarily unavailable.");
   }

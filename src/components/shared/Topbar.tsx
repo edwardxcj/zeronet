@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "../ui/button";
 import { useUserContext } from "@/context/AuthContext";
 import { useSignOutAccount } from "@/lib/react-query/queriesAndMutations";
+import NotificationLink from "./NotificationLink";
 
 const Topbar = () => {
   const navigate = useNavigate();
@@ -12,7 +13,7 @@ const Topbar = () => {
 
   useEffect(() => {
     if (isSuccess) navigate(0);
-  }, [isSuccess]);
+  }, [isSuccess, navigate]);
 
   return (
     <section className="topbar">
@@ -27,6 +28,7 @@ const Topbar = () => {
         </Link>
 
         <div className="flex gap-4">
+          <NotificationLink compact />
           <Button
             variant="ghost"
             className="shad-button_ghost"

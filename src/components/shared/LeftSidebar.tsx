@@ -5,6 +5,7 @@ import { sidebarLinks } from "@/constants";
 import { Button } from "@/components/ui/button";
 import { useSignOutAccount } from "@/lib/react-query/queriesAndMutations";
 import { useUserContext, INITIAL_USER } from "@/context/AuthContext";
+import NotificationLink from "./NotificationLink";
 
 const LeftSidebar = () => {
   const navigate = useNavigate();
@@ -24,8 +25,8 @@ const LeftSidebar = () => {
   };
 
   return (
-    <nav className="leftsidebar">
-      <div className="flex flex-col gap-11">
+    <nav className="leftsidebar gap-6 overflow-y-auto">
+      <div className="flex flex-col gap-8">
         <Link to="/" className="flex gap-3 items-center" aria-label="ZeroNet home">
           <img
             src="/assets/images/zeronet-logo.svg"
@@ -47,7 +48,7 @@ const LeftSidebar = () => {
           </div>
         </Link>
 
-        <ul className="flex flex-col gap-6">
+        <ul className="flex flex-col gap-3">
           {sidebarLinks.map((link: INavLink) => {
             const isActive = pathname === link.route;
 
@@ -74,6 +75,9 @@ const LeftSidebar = () => {
               </li>
             );
           })}
+          <li className="base-medium">
+            <NotificationLink />
+          </li>
         </ul>
       </div>
 

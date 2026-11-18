@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useRef, useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { useIsMutating } from "@tanstack/react-query";
 import {
   useLikePost,
   useSavePost,
@@ -14,6 +16,7 @@ import {
 } from "@/lib/appwrite/relationships";
 import { useToast } from "@/components/ui/use-toast";
 import { Loader } from "lucide-react";
+import { usePostLikes } from "@/lib/react-query/social";
 
 type PostStatsProps = {
   post?: Models.Document;
@@ -22,6 +25,16 @@ type PostStatsProps = {
 
 const PostStats = ({ post, userId }: PostStatsProps) => {
   const [likes, setLikes] = useState(() => relationshipIds(post?.likes));
+  const likeRequest = useRef(false);
+  const embeddedLikes = relationshipIds(post?.likes);
+  const likeState = usePostLikes(post?.$id, embeddedLikes === undefined);
+  const pendingLikes = useIsMutating({
+    mutationKey: ["likePost"],
+    predicate: (mutation) => {
+      const variables = mutation.state.variables as { postId?: string; userId?: string } | undefined;
+      return variables?.postId === post?.$id && variables?.userId === userId;
+    },
+  });
   const { toast } = useToast();
 
   const { mutateAsync: likePost, isPending: isLiking } = useLikePost();
@@ -44,13 +57,18 @@ const PostStats = ({ post, userId }: PostStatsProps) => {
     !!post && !!userId && currentUser?.$id === userId && (isSaved || savedRecordsKnown);
 
   useEffect(() => {
-    setLikes(relationshipIds(post?.likes));
+    setLikes(relationshipIds(post?.likes) ?? likeState.data?.likes);
   }, [post?.$id, post?.likes]);
+
+  useEffect(() => {
+    if (likeState.data) setLikes(likeState.data.likes);
+  }, [likeState.data?.likes]);
 
   const handleLikePost = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!post || !userId || !likes || isLiking) return;
+    if (!post || !userId || !likes || isLiking || pendingLikes > 0 || likeRequest.current) return;
 
+    likeRequest.current = true;
     try {
       const updated = await likePost({
         postId: post.$id,
@@ -60,6 +78,8 @@ const PostStats = ({ post, userId }: PostStatsProps) => {
       setLikes(relationshipIds(updated.likes));
     } catch {
       toast({ title: "Couldn’t update your like. Try again." });
+    } finally {
+      likeRequest.current = false;
     }
   };
 
@@ -87,7 +107,7 @@ const PostStats = ({ post, userId }: PostStatsProps) => {
           type="button"
           aria-label={isLiked ? "Unlike post" : "Like post"}
           aria-pressed={isLiked}
-          disabled={!likes || !post || !userId || isLiking}
+          disabled={!likes || !post || !userId || isLiking || pendingLikes > 0}
           title={likes ? undefined : "Likes unavailable for this post"}
           onClick={handleLikePost}
           className="disabled:opacity-60"
@@ -101,7 +121,27 @@ const PostStats = ({ post, userId }: PostStatsProps) => {
         </button>
 
         <p className="small-medium lg:base-medium">{likes?.length ?? "—"}</p>
+        {likeState.isError && !likes && (
+          <button
+            type="button"
+            className="small-regular text-light-3 underline"
+            disabled={likeState.isFetching}
+            onClick={() => void likeState.refetch()}
+          >
+            Retry likes
+          </button>
+        )}
       </div>
+      {post && (
+        <Link
+          to={`/posts/${post.$id}#comments`}
+          className="flex items-center gap-2 small-regular"
+          aria-label="View comments"
+        >
+          <img src="/assets/icons/chat.svg" alt="" width={20} height={20} />
+          <span className="hidden sm:inline">Comments</span>
+        </Link>
+      )}
       <div className="flex gap-2">
         {isSavingPost || isDeletingSaved ? (
           <Loader />

@@ -7,6 +7,7 @@ import { useToast } from "@/components/ui/use-toast";
 import Loader from "@/components/shared/Loader";
 import PostStats from "@/components/shared/PostStats";
 import GridPostList from "@/components/shared/GridPostList";
+import Comments from "@/components/shared/Comments";
 
 import {
   useGetPostById,
@@ -203,6 +204,8 @@ const PostDetails = () => {
           </div>
         </div>
       </div>
+
+      <Comments key={post.$id} postId={post.$id} />
 
       {creatorId && (
         <div className="w-full max-w-5xl">

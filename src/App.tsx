@@ -17,6 +17,7 @@ import SignupForm from "@/_auth/forms/SignupForm";
 import SigninForm from "@/_auth/forms/SigninForm";
 import ForgotPasswordForm from "@/_auth/forms/ForgotPasswordForm";
 import ResetPasswordForm from "@/_auth/forms/ResetPasswordForm";
+import Notifications from "@/_root/pages/Notifications";
 import { Toaster } from "@/components/ui/toaster";
 
 import "./globals.css";
@@ -38,6 +39,7 @@ const App = () => {
           <Route index element={<Home />} />
           <Route path="/explore" element={<Explore />} />
           <Route path="/saved" element={<Saved />} />
+          <Route path="/notifications" element={<Notifications />} />
           <Route path="/all-users" element={<AllUsers />} />
           <Route path="/create-post" element={<CreatePost />} />
           <Route path="/update-post/:id" element={<EditPost />} />

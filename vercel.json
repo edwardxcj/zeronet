@@ -1,7 +1,7 @@
 {
   "rewrites": [
     {
-      "source": "/:page(sign-in|sign-up|forgot-password|reset-password|explore|saved|all-users|create-post)",
+      "source": "/:page(sign-in|sign-up|forgot-password|reset-password|explore|saved|notifications|all-users|create-post)",
       "destination": "/index.html"
     },
     {
