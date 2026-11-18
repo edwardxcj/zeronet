@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useIsMutating } from "@tanstack/react-query";
+import { useInView } from "react-intersection-observer";
 import {
   useLikePost,
   useSavePost,
@@ -16,7 +17,7 @@ import {
 } from "@/lib/appwrite/relationships";
 import { useToast } from "@/components/ui/use-toast";
 import { Loader } from "lucide-react";
-import { usePostLikes } from "@/lib/react-query/social";
+import { useCommentCount, usePostLikes } from "@/lib/react-query/social";
 
 type PostStatsProps = {
   post?: Models.Document;
@@ -24,6 +25,8 @@ type PostStatsProps = {
 };
 
 const PostStats = ({ post, userId }: PostStatsProps) => {
+  const { ref, inView } = useInView({ fallbackInView: false });
+  const commentCount = useCommentCount(post?.$id, inView);
   const [likes, setLikes] = useState(() => relationshipIds(post?.likes));
   const likeRequest = useRef(false);
   const embeddedLikes = relationshipIds(post?.likes);
@@ -101,7 +104,7 @@ const PostStats = ({ post, userId }: PostStatsProps) => {
   const isLiked = !!likes && checkIsLiked(likes, userId);
 
   return (
-    <div className="flex justify-between items-center z-20">
+    <div ref={ref} className="flex justify-between items-center z-20">
       <div className="flex gap-2 mr-5">
         <button
           type="button"
@@ -136,9 +139,13 @@ const PostStats = ({ post, userId }: PostStatsProps) => {
         <Link
           to={`/posts/${post.$id}#comments`}
           className="flex items-center gap-2 small-regular"
-          aria-label="View comments"
+          aria-label={commentCount.data
+            ? `View ${commentCount.data.count} comments and replies`
+            : "View comments"}
+          title={commentCount.isError && !commentCount.data ? "Comment count unavailable" : undefined}
         >
           <img src="/assets/icons/chat.svg" alt="" width={20} height={20} />
+          <span>{commentCount.data?.count ?? "—"}</span>
           <span className="hidden sm:inline">Comments</span>
         </Link>
       )}

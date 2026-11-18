@@ -4,7 +4,7 @@ const idPattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,35}$/;
 const isId = (value) => typeof value === "string" && idPattern.test(value);
 const pageSize = 20;
 const actions = new Set([
-  "createComment", "listComments", "getComment", "deleteComment", "setLike", "getLikes",
+  "createComment", "listComments", "getComment", "deleteComment", "commentCount", "setLike", "getLikes",
   "listNotifications", "unreadCount", "markNotificationRead", "markAllNotificationsRead",
 ]);
 
@@ -42,7 +42,7 @@ export function validSocialRequest(body) {
     case "listComments":
       return isId(body.postId) && (body.rootId === undefined || isId(body.rootId)) && cursorValid;
     case "getComment": case "deleteComment": return isId(body.commentId);
-    case "getLikes": return isId(body.postId);
+    case "commentCount": case "getLikes": return isId(body.postId);
     case "setLike": return isId(body.postId) && typeof body.shouldLike === "boolean";
     case "listNotifications": return cursorValid;
     case "markNotificationRead": return isId(body.id);
@@ -311,6 +311,11 @@ export function createSocialService({ request, userRequest, collections, usersPa
           return created;
         });
         return { comment: (await commentDTOs([record]))[0] };
+      }
+      case "commentCount": {
+        await assertPostAccess(body.postId);
+        const page = await list(commentsPath, [equal("postId", body.postId), equal("deleted", false), limit(1)]);
+        return { count: page.total };
       }
       case "getComment": {
         const record = await commentRecord(body.commentId);

@@ -235,6 +235,46 @@ test("comment pagination and direct lookup reach roots older than the first page
   assert.equal((await invoke({ action: "getComment", commentId: "comment-22" })).data.comment.content, "22");
 });
 
+test("comment counts use totals across pages, include replies and exclude soft-deleted records", async (t) => {
+  const { invoke, seed, calls } = setup(t);
+  for (let i = 0; i < 31; i++) seed("comments", `count-${i}`, {
+    postId: "post", authorId: "alice", content: `${i}`, deleted: false,
+    parentId: i ? "count-0" : null, rootId: i ? "count-0" : null,
+  });
+  seed("comments", "deleted", {
+    postId: "post", authorId: "alice", content: "", deleted: true, parentId: null, rootId: null,
+  });
+  seed("comments", "elsewhere", {
+    postId: "other-post", authorId: "alice", content: "other post", deleted: false, parentId: null, rootId: null,
+  });
+  assert.deepEqual(await invoke({ action: "commentCount", postId: "post" }), { status: 200, data: { count: 31 } });
+  const countRequest = calls.find((call) => call.url.pathname === paths.comments);
+  const queries = [...countRequest.url.searchParams.values()].map((value) => JSON.parse(value));
+  assert.deepEqual(queries, [
+    { method: "equal", attribute: "postId", values: ["post"] },
+    { method: "equal", attribute: "deleted", values: [false] },
+    { method: "limit", values: [1] },
+  ]);
+  await invoke({ action: "deleteComment", commentId: "count-0" });
+  assert.equal((await invoke({ action: "commentCount", postId: "post" })).data.count, 30,
+    "deleting the root must not remove its surviving replies from the count");
+  await invoke({ action: "deleteComment", commentId: "count-1" });
+  await invoke({ action: "deleteComment", commentId: "count-1" });
+  assert.equal((await invoke({ action: "commentCount", postId: "post" })).data.count, 29);
+});
+
+test("comment counts require a valid post and verified read permission before querying private comments", async (t) => {
+  const { invoke, calls } = setup(t);
+  assert.deepEqual(await invoke({ action: "commentCount", postId: "post" }), { status: 200, data: { count: 0 } });
+  calls.length = 0;
+  assert.equal((await invoke({ action: "commentCount", postId: "../private" })).status, 400);
+  assert.equal(calls.length, 0);
+  assert.equal((await invoke({ action: "commentCount", postId: "post" }, "forged")).status, 401);
+  assert.equal((await invoke({ action: "commentCount", postId: "post" }, "carol")).status, 404);
+  assert.equal((await invoke({ action: "commentCount", postId: "missing-post" })).status, 404);
+  assert.ok(calls.every((call) => call.url.pathname !== paths.comments));
+});
+
 test("likes union concurrent actors and preserve the existing inverse liked relation", async (t) => {
   const { invoke, tables } = setup(t);
   const results = await Promise.all(["alice", "bob"].map((actor) => invoke({ action: "setLike", postId: "post", shouldLike: true, userId: "owner-profile" }, actor)));

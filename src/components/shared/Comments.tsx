@@ -8,6 +8,7 @@ import { useUserContext } from "@/context/AuthContext";
 import { type Comment } from "@/lib/appwrite/social";
 import {
   useComment,
+  useCommentCount,
   useComments,
   useCreateComment,
   useDeleteComment,
@@ -263,6 +264,7 @@ const Comments = ({ postId }: { postId: string }) => {
   const root = useComment(postId, target.data?.rootId ?? undefined);
   const linkedRoot = target.data?.rootId ? root.data : target.data;
   const comments = useComments(postId);
+  const commentCount = useCommentCount(postId);
   const creation = useCreateComment(postId);
   const [content, setContent] = useState("");
   const [replyTarget, setReplyTarget] = useState<Comment>();
@@ -329,7 +331,22 @@ const Comments = ({ postId }: { postId: string }) => {
 
   return (
     <section ref={section} id="comments" aria-labelledby="comments-title" className="w-full max-w-5xl">
-      <h3 id="comments-title" className="body-bold md:h3-bold mb-6">Comments</h3>
+      <div className="mb-6 flex flex-wrap items-center gap-3">
+        <h3 id="comments-title" className="body-bold md:h3-bold">
+          Comments <span className="text-light-3">({commentCount.data?.count ?? "—"})</span>
+        </h3>
+        {commentCount.isError && !commentCount.data && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={commentCount.isFetching}
+            onClick={() => void commentCount.refetch()}
+          >
+            Retry comment count
+          </Button>
+        )}
+      </div>
       {isAuthenticated && user.id ? (
         <form onSubmit={handleSubmit} className="mb-8 flex flex-col gap-3">
           {replyTarget && (

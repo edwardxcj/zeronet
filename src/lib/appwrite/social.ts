@@ -40,6 +40,7 @@ const notificationSchema = z.object({
 export type Notification = z.infer<typeof notificationSchema>;
 
 type SocialRequest =
+  | { action: "commentCount"; postId: string }
   | { action: "getComment"; commentId: string }
   | { action: "listComments"; postId: string; rootId?: string; cursor?: string }
   | { action: "createComment"; postId: string; content: string; parentId?: string; requestId: string }
@@ -85,6 +86,12 @@ const commentsPage = z.object({
   comments: z.array(commentSchema),
   nextCursor: z.string().nullable(),
 });
+
+export async function getCommentCount(postId: string) {
+  return z.object({ count: z.number().int().nonnegative() }).parse(
+    await executeSocial({ action: "commentCount", postId })
+  );
+}
 
 export async function listComments(postId: string, rootId?: string, cursor?: string) {
   const response = commentsPage.parse(

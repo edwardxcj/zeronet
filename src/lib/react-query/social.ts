@@ -12,6 +12,7 @@ import {
   deleteComment,
   getPostLikes,
   getComment,
+  getCommentCount,
   listComments,
   listNotifications,
   markAllNotificationsRead,
@@ -19,6 +20,25 @@ import {
   unreadNotificationCount,
   type Comment,
 } from "@/lib/appwrite/social";
+
+const commentCountKey = (userId: string, postId?: string) =>
+  ["commentCount", userId, postId] as const;
+
+export function useCommentCount(postId?: string, enabled = true) {
+  const { user, isAuthenticated } = useUserContext();
+  return useQuery({
+    queryKey: commentCountKey(user.id, postId),
+    queryFn: () => {
+      if (!postId) throw new Error("A post is required.");
+      return getCommentCount(postId);
+    },
+    enabled: enabled && isAuthenticated && !!user.id && !!postId,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+    retry: false,
+  });
+}
 
 export function useComments(postId: string, rootId?: string, enabled = true) {
   const { user, isAuthenticated } = useUserContext();
@@ -42,6 +62,7 @@ export function useCreateComment(postId: string) {
       queryClient.setQueryData(["comment", user.id, postId, comment.$id], comment);
       return Promise.all([
         queryClient.invalidateQueries({ queryKey: ["comments", user.id, postId] }),
+        queryClient.invalidateQueries({ queryKey: commentCountKey(user.id, postId) }),
         queryClient.invalidateQueries({ queryKey: ["notifications"] }),
         queryClient.invalidateQueries({ queryKey: ["notificationUnread"] }),
       ]);
@@ -75,6 +96,7 @@ export function useDeleteComment(postId: string) {
       );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey }),
+        queryClient.invalidateQueries({ queryKey: commentCountKey(user.id, postId) }),
         queryClient.invalidateQueries({ queryKey: ["comment", user.id, postId] }),
       ]);
     },
