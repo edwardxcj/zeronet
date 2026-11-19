@@ -20,12 +20,15 @@ import { Loader } from "lucide-react";
 import { useCommentCount, usePostLikes } from "@/lib/react-query/social";
 import SharePostButton from "./SharePostButton";
 
+const actionButtonClass = "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-60";
+
 type PostStatsProps = {
   post?: Models.Document;
   userId: string;
+  compact?: boolean;
 };
 
-const PostStats = ({ post, userId }: PostStatsProps) => {
+const PostStats = ({ post, userId, compact = false }: PostStatsProps) => {
   const { ref, inView } = useInView({ fallbackInView: false });
   const commentCount = useCommentCount(post?.$id, inView);
   const [likes, setLikes] = useState(() => relationshipIds(post?.likes));
@@ -105,55 +108,62 @@ const PostStats = ({ post, userId }: PostStatsProps) => {
   const isLiked = !!likes && checkIsLiked(likes, userId);
 
   return (
-    <div ref={ref} className="flex flex-wrap justify-between items-center gap-2 z-20">
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          aria-label={isLiked ? "Unlike post" : "Like post"}
-          aria-pressed={isLiked}
-          disabled={!likes || !post || !userId || isLiking || pendingLikes > 0}
-          title={likes ? undefined : "Likes unavailable for this post"}
-          onClick={handleLikePost}
-          className="disabled:opacity-60"
-        >
-          <img
-            src={isLiked ? "/assets/icons/liked.svg" : "/assets/icons/like.svg"}
-            alt=""
-            width={20}
-            height={20}
-          />
-        </button>
-
-        <p className="small-medium lg:base-medium">{likes?.length ?? "—"}</p>
-        {likeState.isError && !likes && (
+    <div
+      ref={ref}
+      className="z-20 flex w-full min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2"
+    >
+      <div className={`flex min-w-0 flex-wrap items-center gap-y-2 ${compact ? "gap-x-4" : "gap-x-5"}`}>
+        <div className={`flex items-center ${compact ? "gap-1" : "gap-2"}`}>
           <button
             type="button"
-            className="small-regular text-light-3 underline"
-            disabled={likeState.isFetching}
-            onClick={() => void likeState.refetch()}
+            aria-label={isLiked ? "Unlike post" : "Like post"}
+            aria-pressed={isLiked}
+            disabled={!likes || !post || !userId || isLiking || pendingLikes > 0}
+            title={likes ? undefined : "Likes unavailable for this post"}
+            onClick={handleLikePost}
+            className={actionButtonClass}
           >
-            Retry likes
+            <img
+              src={isLiked ? "/assets/icons/liked.svg" : "/assets/icons/like.svg"}
+              alt=""
+              width={20}
+              height={20}
+            />
           </button>
+
+          <p className={compact ? "small-medium tabular-nums" : "small-medium lg:base-medium"}>{likes?.length ?? "—"}</p>
+          {likeState.isError && !likes && (
+            <button
+              type="button"
+              className="small-regular text-light-3 underline"
+              disabled={likeState.isFetching}
+              onClick={() => void likeState.refetch()}
+            >
+              Retry likes
+            </button>
+          )}
+        </div>
+        {post && (
+          <Link
+            to={`/posts/${post.$id}#comments`}
+            className={`flex h-8 shrink-0 items-center rounded-lg px-1 tabular-nums transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 ${compact ? "gap-1.5 small-medium" : "gap-2 small-regular"}`}
+            aria-label={commentCount.data
+              ? `View comments and replies (${commentCount.data.count})`
+              : "View comments"}
+            title={commentCount.isError && !commentCount.data ? "Comment count unavailable" : undefined}
+          >
+            <img src="/assets/icons/chat.svg" alt="" width={20} height={20} />
+            <span>{commentCount.data?.count ?? "—"}</span>
+            {!compact && <span className="hidden sm:inline">{commentCount.data?.count === 1 ? "Comment" : "Comments"}</span>}
+          </Link>
         )}
       </div>
-      {post && (
-        <Link
-          to={`/posts/${post.$id}#comments`}
-          className="flex items-center gap-2 small-regular"
-          aria-label={commentCount.data
-            ? `View comments and replies (${commentCount.data.count})`
-            : "View comments"}
-          title={commentCount.isError && !commentCount.data ? "Comment count unavailable" : undefined}
-        >
-          <img src="/assets/icons/chat.svg" alt="" width={20} height={20} />
-          <span>{commentCount.data?.count ?? "—"}</span>
-          <span className="hidden sm:inline">{commentCount.data?.count === 1 ? "Comment" : "Comments"}</span>
-        </Link>
-      )}
-      <div className="flex items-center gap-3">
+      <div className={`flex shrink-0 items-center ${compact ? "gap-2" : "gap-3"}`}>
         {post && <SharePostButton postId={post.$id} />}
         {isSavingPost || isDeletingSaved ? (
-          <Loader />
+          <span className="flex h-8 w-8 items-center justify-center" role="status" aria-label="Updating saved post">
+            <Loader className="h-5 w-5 animate-spin" aria-hidden="true" />
+          </span>
         ) : (
           <button
             type="button"
@@ -162,7 +172,7 @@ const PostStats = ({ post, userId }: PostStatsProps) => {
             disabled={!canSave}
             title={canSave ? undefined : "Saved posts unavailable"}
             onClick={handleSavePost}
-            className="disabled:opacity-60"
+            className={actionButtonClass}
           >
             <img
               src={isSaved ? "/assets/icons/saved.svg" : "/assets/icons/save.svg"}

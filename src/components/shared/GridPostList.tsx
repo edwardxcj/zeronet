@@ -31,19 +31,21 @@ const GridPostList = ({
 
           <div className="grid-post_user">
             {showUser && (
-              <div className="flex items-center justify-start gap-2 flex-1">
+              <div className="flex w-full min-w-0 items-center gap-2.5">
                 <img
                   src={
                     post.creator?.imageUrl ||
                     "/assets/icons/profile-placeholder.svg"
                   }
                   alt="creator"
-                  className="w-8 h-8 rounded-full"
+                  className="h-8 w-8 shrink-0 rounded-full object-cover"
                 />
-                <p className="line-clamp-1">{post.creator?.name || "Unknown creator"}</p>
+                <p className="min-w-0 flex-1 break-words text-sm font-medium leading-snug [overflow-wrap:anywhere]">
+                  {post.creator?.name || "Unknown creator"}
+                </p>
               </div>
             )}
-            {showStats && <PostStats post={post} userId={user.id} />}
+            {showStats && <PostStats post={post} userId={user.id} compact />}
           </div>
         </li>
       ))}

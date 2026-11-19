@@ -214,7 +214,7 @@
   }
 
   .grid-post_user {
-    @apply absolute bottom-0 p-5 flex-between w-full bg-gradient-to-t from-dark-3 to-transparent rounded-b-[24px] gap-2;
+    @apply absolute bottom-0 flex w-full min-w-0 flex-col items-stretch gap-3 rounded-b-[24px] bg-gradient-to-t from-black/90 via-black/50 to-transparent p-4 sm:p-5;
   }
 
   /* Left sidebar */
