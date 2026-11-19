@@ -44,70 +44,16 @@ function readRequest(req) {
   }
 }
 
-async function countFollows(request, path, field, accountId) {
-  const queries = new URLSearchParams({
-    "queries[0]": JSON.stringify({
-      method: "equal",
-      attribute: field,
-      values: [accountId],
-    }),
-    "queries[1]": JSON.stringify({ method: "limit", values: [1] }),
-  });
-  const response = await request(`${path}?${queries}`);
-  if (!response.ok) throw new Error("Could not count follows");
-  const { total } = await response.json();
-  if (!Number.isSafeInteger(total) || total < 0) {
-    throw new Error("Invalid follow count");
-  }
-  return total;
+function connectionField(direction) {
+  return direction === "followers" ? "followerId" : "followingId";
 }
 
-async function listFollowing(request, path, accountId) {
-  const pageSize = 100;
-  const accountIds = new Set();
-  const usedCursors = new Set();
-  let cursor;
-
-  while (true) {
-    const queries = [
-      { method: "equal", attribute: "followerId", values: [accountId] },
-      { method: "limit", values: [pageSize] },
-      { method: "select", values: ["$id", "followingId"] },
-    ];
-    if (cursor) queries.push({ method: "cursorAfter", values: [cursor] });
-
-    const params = new URLSearchParams(
-      queries.map((query, index) => [`queries[${index}]`, JSON.stringify(query)])
-    );
-    const response = await request(`${path}?${params}`);
-    if (!response.ok) throw new Error("Could not list follows");
-
-    const { documents } = await response.json();
-    if (!Array.isArray(documents)) throw new Error("Invalid follows page");
-
-    for (const record of documents) {
-      if (!isId(record?.followingId)) throw new Error("Invalid follow account ID");
-      accountIds.add(record.followingId);
-    }
-
-    if (documents.length < pageSize) return [...accountIds];
-
-    cursor = documents.at(-1)?.$id;
-    if (!isId(cursor) || usedCursors.has(cursor)) {
-      throw new Error("Invalid follows cursor");
-    }
-    usedCursors.add(cursor);
-  }
-}
-
-async function listConnections(request, followsPath, usersPath, accountId, direction, cursor) {
-  const pageSize = 20;
+async function readFollowPage(request, followsPath, accountId, direction, cursor, pageSize) {
   const filterField = direction === "followers" ? "followingId" : "followerId";
-  const connectionField = direction === "followers" ? "followerId" : "followingId";
   const queries = [
     { method: "equal", attribute: filterField, values: [accountId] },
     { method: "limit", values: [pageSize] },
-    { method: "select", values: ["$id", connectionField] },
+    { method: "select", values: ["$id", connectionField(direction)] },
     { method: "orderAsc", attribute: "$id" },
   ];
   if (cursor) queries.push({ method: "cursorAfter", values: [cursor] });
@@ -118,50 +64,94 @@ async function listConnections(request, followsPath, usersPath, accountId, direc
   const response = await request(`${followsPath}?${parameters}`);
   if (!response.ok) throw new Error("Could not list connections");
   const { documents: edges } = await response.json();
-  if (!Array.isArray(edges)) throw new Error("Invalid connections page");
-
-  const accountIds = [];
+  if (!Array.isArray(edges) || edges.length > pageSize) throw new Error("Invalid connections page");
+  const edgeIds = new Set();
   for (const edge of edges) {
-    if (!isId(edge?.$id) || !isId(edge[connectionField])) {
-      throw new Error("Invalid connection");
+    if (!isId(edge?.$id) || edge.$id === cursor || edgeIds.has(edge.$id)) {
+      throw new Error("Invalid connections cursor");
     }
-    accountIds.push(edge[connectionField]);
+    edgeIds.add(edge.$id);
   }
   const nextCursor = edges.length === pageSize ? edges.at(-1).$id : null;
-  if (nextCursor !== null && nextCursor === cursor) {
-    throw new Error("Invalid connections cursor");
+  return { edges, nextCursor };
+}
+
+function counterpartIds(edges, accountId, direction) {
+  return [...new Set(edges.map((edge) => edge[connectionField(direction)])
+    .filter((id) => isId(id) && id !== accountId))];
+}
+
+async function readConnectionAccounts(request, followsPath, accountId, direction) {
+  const accountIds = new Set();
+  const edgeIds = new Set();
+  let cursor;
+  while (true) {
+    const page = await readFollowPage(request, followsPath, accountId, direction, cursor, 100);
+    for (const edge of page.edges) {
+      if (edgeIds.has(edge.$id)) throw new Error("Invalid connections cursor");
+      edgeIds.add(edge.$id);
+    }
+    counterpartIds(page.edges, accountId, direction).forEach((id) => accountIds.add(id));
+    if (!page.nextCursor) return [...accountIds];
+    cursor = page.nextCursor;
   }
-  if (accountIds.length === 0) return { profiles: [], nextCursor: null };
+}
 
-  const profileQueries = [
-    { method: "equal", attribute: "accountId", values: [...new Set(accountIds)] },
-    { method: "limit", values: [pageSize] },
-    {
-      method: "select",
-      values: ["$id", "accountId", "name", "username", "imageUrl"],
-    },
-  ];
-  const profileParameters = new URLSearchParams(
-    profileQueries.map((query, index) => [`queries[${index}]`, JSON.stringify(query)])
-  );
-  const profileResponse = await request(`${usersPath}?${profileParameters}`);
-  if (!profileResponse.ok) throw new Error("Could not load connection profiles");
-  const { documents } = await profileResponse.json();
-  if (!Array.isArray(documents)) throw new Error("Invalid connection profiles");
-
+async function readConnectionProfiles(request, usersPath, accountIds) {
   const profilesByAccount = new Map();
-  for (const profile of documents) {
-    if (!isId(profile?.$id) || !accountIds.includes(profile.accountId)) continue;
-    profilesByAccount.set(profile.accountId, {
-      $id: profile.$id,
-      name: typeof profile.name === "string" ? profile.name : "ZeroNet member",
-      username: typeof profile.username === "string" ? profile.username : "",
-      imageUrl: typeof profile.imageUrl === "string" ? profile.imageUrl : "",
-    });
+  // Batch by account, and paginate profiles too so duplicate legacy profiles do
+  // not hide a different real account behind the response's document limit.
+  for (let offset = 0; offset < accountIds.length; offset += 25) {
+    const batch = accountIds.slice(offset, offset + 25);
+    const seenProfiles = new Set();
+    let cursor;
+    while (true) {
+      const queries = [
+        { method: "equal", attribute: "accountId", values: batch },
+        { method: "limit", values: [100] },
+        { method: "select", values: ["$id", "accountId", "name", "username", "imageUrl"] },
+        { method: "orderAsc", attribute: "$id" },
+      ];
+      if (cursor) queries.push({ method: "cursorAfter", values: [cursor] });
+      const parameters = new URLSearchParams(
+        queries.map((query, index) => [`queries[${index}]`, JSON.stringify(query)])
+      );
+      const response = await request(`${usersPath}?${parameters}`);
+      if (!response.ok) throw new Error("Could not load connection profiles");
+      const { documents } = await response.json();
+      if (!Array.isArray(documents) || documents.length > 100) throw new Error("Invalid connection profiles");
+      for (const profile of documents) {
+        if (!isId(profile?.$id) || !batch.includes(profile.accountId) || seenProfiles.has(profile.$id)) {
+          throw new Error("Invalid connection profiles");
+        }
+        seenProfiles.add(profile.$id);
+        if (!profilesByAccount.has(profile.accountId)) {
+          profilesByAccount.set(profile.accountId, {
+            $id: profile.$id,
+            name: typeof profile.name === "string" ? profile.name : "ZeroNet member",
+            username: typeof profile.username === "string" ? profile.username : "",
+            imageUrl: typeof profile.imageUrl === "string" ? profile.imageUrl : "",
+          });
+        }
+      }
+      if (documents.length < 100 || batch.every((id) => profilesByAccount.has(id))) break;
+      cursor = documents.at(-1).$id;
+    }
   }
-  const profiles = [...new Set(accountIds)]
-    .map((id) => profilesByAccount.get(id))
-    .filter(Boolean);
+  return profilesByAccount;
+}
+
+async function validConnectionAccounts(request, followsPath, usersPath, accountId, direction) {
+  const accountIds = await readConnectionAccounts(request, followsPath, accountId, direction);
+  const profiles = await readConnectionProfiles(request, usersPath, accountIds);
+  return accountIds.filter((id) => profiles.has(id));
+}
+
+async function listConnections(request, followsPath, usersPath, accountId, direction, cursor) {
+  const { edges, nextCursor } = await readFollowPage(request, followsPath, accountId, direction, cursor, 20);
+  const accountIds = counterpartIds(edges, accountId, direction);
+  const profilesByAccount = await readConnectionProfiles(request, usersPath, accountIds);
+  const profiles = accountIds.map((id) => profilesByAccount.get(id)).filter(Boolean);
   return { profiles, nextCursor };
 }
 
@@ -229,6 +219,7 @@ export default async function handler({ req, res, error }) {
   };
   const collections = `/databases/${encodeURIComponent(databaseId)}/collections`;
   const follows = `${collections}/follows/documents`;
+  const users = `${collections}/${encodeURIComponent(usersCollectionId)}/documents`;
   const userRequest = (path) => fetch(`${base}${path}`, {
     redirect: "error", headers: { ...headers, "X-Appwrite-JWT": jwt },
   });
@@ -256,7 +247,7 @@ export default async function handler({ req, res, error }) {
     }
 
     if (body.action === "listFollowing") {
-      const accountIds = await listFollowing(request, follows, followerId);
+      const accountIds = await validConnectionAccounts(request, follows, users, followerId, "following");
       return res.json({ accountIds });
     }
 
@@ -328,10 +319,10 @@ export default async function handler({ req, res, error }) {
 
     const [following, followers, followingCount] = await Promise.all([
       isFollowing,
-      countFollows(request, follows, "followingId", followingId),
-      countFollows(request, follows, "followerId", followingId),
+      validConnectionAccounts(request, follows, users, followingId, "followers"),
+      validConnectionAccounts(request, follows, users, followingId, "following"),
     ]);
-    return res.json({ following, counts: { followers, following: followingCount } });
+    return res.json({ following, counts: { followers: followers.length, following: followingCount.length } });
   } catch (cause) {
     if (cause instanceof SocialError) return fail(cause.status, cause.message);
     if (cause instanceof SocialUpstreamError) {
