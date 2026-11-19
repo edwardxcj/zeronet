@@ -10,8 +10,9 @@ Share photo posts, discover what others are publishing, and bookmark your favori
 
 ## Features
 
-- **Publish photos.** Upload a photo with a caption, location, and tags. Edit or delete your own posts.
-- **Explore the feed.** Browse recent posts, scroll to load more in Explore, or search by caption.
+- **Publish photos.** Upload a photo with a caption, location, and tags, with real upload progress. Drafts save text and the selected image on the current device, separately for each account and post. Edit or delete your own posts.
+- **Explore the feed.** Browse paginated All posts and Following feeds, keep your place when returning from a post, or search captions in Explore.
+- **Share posts.** Use the device share menu or copy a link to the original site. Shared post links return to the post after login.
 - **Keep your favorites.** Like posts and bookmark them in a dedicated Saved view.
 - **Make it yours.** Sign up with email and password, then customize your name, bio, and avatar.
 - **Discover creators.** Browse the People directory and open creator profiles.

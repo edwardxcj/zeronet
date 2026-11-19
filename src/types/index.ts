@@ -13,12 +13,17 @@ export type IUpdateUser = {
   file: File[];
 };
 
+export type PostSaveProgress =
+  | { phase: "uploading"; percent?: number }
+  | { phase: "saving" };
+
 export type INewPost = {
   userId: string;
   caption: string;
   file: File[];
   location?: string;
   tags?: string;
+  onProgress?: (progress: PostSaveProgress) => void;
 };
 
 export type IUpdatePost = {
@@ -29,6 +34,7 @@ export type IUpdatePost = {
   file: File[];
   location?: string;
   tags?: string;
+  onProgress?: (progress: PostSaveProgress) => void;
 };
 
 export type IUser = {

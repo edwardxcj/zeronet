@@ -2,7 +2,7 @@ import { useState } from "react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 import {
   Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
@@ -14,6 +14,7 @@ import { authErrorMessage } from "@/lib/authErrors";
 import { ForgotPasswordValidation } from "@/lib/validation";
 
 const ForgotPasswordForm = () => {
+  const { state } = useLocation();
   const [sent, setSent] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const form = useForm<z.infer<typeof ForgotPasswordValidation>>({
@@ -70,7 +71,7 @@ const ForgotPasswordForm = () => {
           </Button>
         </form>
       )}
-      <p className="auth-footer"><Link to="/sign-in">Back to log in</Link></p>
+      <p className="auth-footer"><Link to="/sign-in" state={state}>Back to log in</Link></p>
     </Form>
   );
 };

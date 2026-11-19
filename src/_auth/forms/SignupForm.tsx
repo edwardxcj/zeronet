@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import * as z from "zod";
 import { useForm } from "react-hook-form";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import {
@@ -24,9 +24,11 @@ import { CompleteProfileValidation, SignupValidation } from "@/lib/validation";
 import { useUserContext } from "@/context/AuthContext";
 import { completeSignupProfile, getAccount } from "@/lib/appwrite/api";
 import { authErrorMessage, SignupProfileError } from "@/lib/authErrors";
+import { postLoginDestination } from "@/lib/postLoginDestination";
 
 const SignupForm = () => {
   const navigate = useNavigate();
+  const { state } = useLocation();
   const [params] = useSearchParams();
   const completeMode = params.get("complete") === "1";
   const { checkAuthUser } = useUserContext();
@@ -95,7 +97,7 @@ const SignupForm = () => {
       }
 
       if (await checkAuthUser()) {
-        navigate("/");
+        navigate(postLoginDestination(state), { replace: true });
       } else {
         setSubmitError("Your account is ready, but your profile could not be loaded. Retry to continue.");
       }
@@ -206,7 +208,7 @@ const SignupForm = () => {
         {submitError && <p role="alert" className="auth-error text-sm">{submitError}</p>}
         {completeMode && !accountReady && submitError && (
           requiresLogin ? (
-            <Link to="/sign-in" className="text-sm text-[#c2b9ff] underline">
+            <Link to="/sign-in" state={state} className="text-sm text-[#c2b9ff] underline">
               Log in to continue
             </Link>
           ) : (
@@ -236,7 +238,7 @@ const SignupForm = () => {
 
       <p className="auth-footer">
         Already have an account?{" "}
-        <Link to="/sign-in">Log in</Link>
+        <Link to="/sign-in" state={state}>Log in</Link>
       </p>
     </Form>
   );

@@ -147,6 +147,7 @@ export const useCreatePost = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (post: INewPost) => createPost(post),
+    retry: false,
     onSuccess: (post) => {
       if (post) void invalidatePostLists(queryClient);
     },
@@ -175,6 +176,7 @@ export const useUpdatePost = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (post: IUpdatePost) => updatePost(post),
+    retry: false,
     onSuccess: (data) => {
       if (!data) return;
       void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.GET_POST_BY_ID, data.$id] });

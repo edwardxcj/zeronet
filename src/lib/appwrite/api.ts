@@ -1,7 +1,7 @@
 import { ID, Query } from "appwrite";
 
 import { appwriteConfig, account, databases, storage, avatars } from "./config";
-import { IUpdatePost, INewPost, INewUser, IUpdateUser } from "@/types";
+import { IUpdatePost, INewPost, INewUser, IUpdateUser, PostSaveProgress } from "@/types";
 import { normalizeImageUrls } from "./imageUrls";
 import { setPostLike } from "./social";
 import { SignupProfileError } from "../authErrors";
@@ -182,7 +182,7 @@ export async function signOutAccount() {
 export async function createPost(post: INewPost) {
   try {
     // Upload file to appwrite storage
-    const uploadedFile = await uploadFile(post.file[0]);
+    const uploadedFile = await uploadFile(post.file[0], post.onProgress);
 
     if (!uploadedFile) throw Error;
 
@@ -196,6 +196,7 @@ export async function createPost(post: INewPost) {
     // Convert tags into array
     const tags = post.tags?.replace(/ /g, "").split(",") || [];
 
+    post.onProgress?.({ phase: "saving" });
     // Create post
     const newPost = await databases.createDocument(
       appwriteConfig.databaseId,
@@ -223,14 +224,21 @@ export async function createPost(post: INewPost) {
 }
 
 // ============================== UPLOAD FILE
-export async function uploadFile(file: File) {
+export async function uploadFile(file: File, onProgress?: (progress: PostSaveProgress) => void) {
   try {
+    onProgress?.({ phase: "uploading" });
     const uploadedFile = await storage.createFile(
       appwriteConfig.storageId,
       ID.unique(),
-      file
+      file,
+      undefined,
+      (progress) => onProgress?.({
+        phase: "uploading",
+        percent: Math.max(0, Math.min(100, progress.progress)),
+      })
     );
 
+    onProgress?.({ phase: "uploading", percent: 100 });
     return uploadedFile;
   } catch (error) {
     console.log(error);
@@ -308,7 +316,7 @@ export async function updatePost(post: IUpdatePost) {
 
     if (hasFileToUpdate) {
       // Upload new file to appwrite storage
-      const uploadedFile = await uploadFile(post.file[0]);
+      const uploadedFile = await uploadFile(post.file[0], post.onProgress);
       if (!uploadedFile) throw Error;
 
       // Get new file url
@@ -324,6 +332,7 @@ export async function updatePost(post: IUpdatePost) {
     // Convert tags into array
     const tags = post.tags?.replace(/ /g, "").split(",") || [];
 
+    post.onProgress?.({ phase: "saving" });
     //  Update post
     const updatedPost = await databases.updateDocument(
       appwriteConfig.databaseId,

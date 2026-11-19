@@ -36,11 +36,11 @@ const AuthContext = createContext<IContextType>(INITIAL_STATE);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
-  const { pathname } = useLocation();
-  const currentPath = useRef(pathname);
+  const { pathname, search, hash } = useLocation();
+  const currentPath = useRef({ pathname, search, hash });
   const navigateRef = useRef(navigate);
   const authRequest = useRef(0);
-  currentPath.current = pathname;
+  currentPath.current = { pathname, search, hash };
   navigateRef.current = navigate;
   const [user, setUser] = useState<IUser>(INITIAL_USER);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -88,9 +88,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         active &&
         authRequest.current === initialRequest &&
         !authenticated &&
-        !isAuthPath(currentPath.current)
+        !isAuthPath(currentPath.current.pathname)
       ) {
-        navigateRef.current("/sign-in", { replace: true });
+        const { pathname, search, hash } = currentPath.current;
+        navigateRef.current("/sign-in", { replace: true, state: { from: pathname + search + hash } });
       }
     });
     return () => { active = false; };

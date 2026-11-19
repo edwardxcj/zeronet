@@ -18,6 +18,7 @@ import {
 import { useToast } from "@/components/ui/use-toast";
 import { Loader } from "lucide-react";
 import { useCommentCount, usePostLikes } from "@/lib/react-query/social";
+import SharePostButton from "./SharePostButton";
 
 type PostStatsProps = {
   post?: Models.Document;
@@ -104,8 +105,8 @@ const PostStats = ({ post, userId }: PostStatsProps) => {
   const isLiked = !!likes && checkIsLiked(likes, userId);
 
   return (
-    <div ref={ref} className="flex justify-between items-center z-20">
-      <div className="flex gap-2 mr-5">
+    <div ref={ref} className="flex flex-wrap justify-between items-center gap-2 z-20">
+      <div className="flex items-center gap-2">
         <button
           type="button"
           aria-label={isLiked ? "Unlike post" : "Like post"}
@@ -140,16 +141,17 @@ const PostStats = ({ post, userId }: PostStatsProps) => {
           to={`/posts/${post.$id}#comments`}
           className="flex items-center gap-2 small-regular"
           aria-label={commentCount.data
-            ? `View ${commentCount.data.count} comments and replies`
+            ? `View comments and replies (${commentCount.data.count})`
             : "View comments"}
           title={commentCount.isError && !commentCount.data ? "Comment count unavailable" : undefined}
         >
           <img src="/assets/icons/chat.svg" alt="" width={20} height={20} />
           <span>{commentCount.data?.count ?? "—"}</span>
-          <span className="hidden sm:inline">Comments</span>
+          <span className="hidden sm:inline">{commentCount.data?.count === 1 ? "Comment" : "Comments"}</span>
         </Link>
       )}
-      <div className="flex gap-2">
+      <div className="flex items-center gap-3">
+        {post && <SharePostButton postId={post.$id} />}
         {isSavingPost || isDeletingSaved ? (
           <Loader />
         ) : (

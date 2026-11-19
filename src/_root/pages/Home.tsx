@@ -1,12 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useInView } from "react-intersection-observer";
 import { Link } from "react-router-dom";
 
 import {
   useGetFollowingPosts,
-  useGetRecentPosts,
   useGetUsers,
 } from "@/lib/react-query/queriesAndMutations";
+import { useHomeFeed } from "@/lib/react-query/homeFeed";
+import {
+  captureHomeScroll,
+  readHomeView,
+  rememberHomeFeed,
+  rememberHomeScroll,
+  restoreHomeScroll,
+  uniqueFeedPosts,
+  type HomeFeed,
+} from "@/lib/homeFeedState";
 import Loader from "@/components/shared/Loader";
 import PostCard from "@/components/shared/PostCard";
 import UserCard from "@/components/shared/UserCard";
@@ -17,8 +26,6 @@ const feeds = [
   { id: "all", label: "All posts" },
   { id: "following", label: "Following" },
 ] as const;
-
-type Feed = (typeof feeds)[number]["id"];
 
 function FeedError({
   message,
@@ -44,9 +51,13 @@ function FeedError({
   );
 }
 
-const Home = () => {
-  const [feed, setFeed] = useState<Feed>("all");
+const HomeContent = ({ viewerId }: { viewerId: string }) => {
+  const [feed, setFeed] = useState<HomeFeed>(() => readHomeView(viewerId).feed);
+  const [ready, setReady] = useState(false);
   const feedContainer = useRef<HTMLDivElement>(null);
+  const restoredFeed = useRef<HomeFeed>();
+  const pageCount = useRef(0);
+  const desiredPosition = useMemo(() => readHomeView(viewerId).positions[feed], [viewerId, feed]);
   const { ref: nextPageRef, inView } = useInView({
     rootMargin: "120px",
     fallbackInView: false,
@@ -54,19 +65,25 @@ const Home = () => {
   const { isAuthenticated, isLoading: isAuthLoading } = useUserContext();
   const isFollowingFeed = feed === "following";
 
-  const recentPosts = useGetRecentPosts();
+  const recentPosts = useHomeFeed(!isFollowingFeed);
   const followingPosts = useGetFollowingPosts(isFollowingFeed);
+  const retainedFollowing = useRef(followingPosts.data);
+  if (followingPosts.data) retainedFollowing.current = followingPosts.data;
   const activeFeed = isFollowingFeed ? followingPosts : recentPosts;
-  const posts = isFollowingFeed
-    ? followingPosts.data?.pages.flatMap((page) => page.documents)
-    : recentPosts.data?.documents;
+  // The existing Following hook hides data while refreshing creator IDs. Keep
+  // its last loaded cards mounted so that a background refresh cannot clamp scroll.
+  const data = isFollowingFeed ? followingPosts.data ?? retainedFollowing.current : recentPosts.data;
+  const posts = useMemo(() => data ? uniqueFeedPosts(data.pages) : undefined, [data]);
+  const loadedPages = data?.pages.length ?? 0;
+  pageCount.current = loadedPages;
   const {
     fetchNextPage,
     fetchStatus,
     hasNextPage,
     isFetchingNextPage,
-    isError: isFollowingError,
-  } = followingPosts;
+    isError,
+    isFetching,
+  } = activeFeed;
   const {
     data: creators,
     isLoading: isUserLoading,
@@ -74,22 +91,72 @@ const Home = () => {
     refetch: refetchCreators,
   } = useGetUsers(10);
 
+  useLayoutEffect(() => {
+    const container = feedContainer.current;
+    if (!container) return;
+    const save = () => {
+      if (restoredFeed.current === feed) {
+        rememberHomeScroll(viewerId, feed, captureHomeScroll(container, pageCount.current));
+      }
+    };
+    const stopRestoring = () => {
+      if (restoredFeed.current === feed || pageCount.current === 0) return;
+      restoredFeed.current = feed;
+      setReady(true);
+      save();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) stopRestoring();
+    };
+    container.addEventListener("scroll", save, { passive: true });
+    container.addEventListener("wheel", stopRestoring, { passive: true });
+    container.addEventListener("touchstart", stopRestoring, { passive: true });
+    container.addEventListener("keydown", onKeyDown);
+    return () => {
+      // Capture this actual element before React removes it on navigation.
+      save();
+      container.removeEventListener("scroll", save);
+      container.removeEventListener("wheel", stopRestoring);
+      container.removeEventListener("touchstart", stopRestoring);
+      container.removeEventListener("keydown", onKeyDown);
+    };
+  }, [viewerId, feed]);
+
+  useLayoutEffect(() => {
+    if (restoredFeed.current === feed || !posts || !feedContainer.current) return;
+    // The cache normally supplies these pages immediately. If it expired while
+    // visiting a post, recover only the number of pages the viewer had loaded.
+    if (loadedPages < desiredPosition.pages && hasNextPage && !isError) {
+      if (fetchStatus === "idle" && !isFetching) void fetchNextPage({ cancelRefetch: false });
+      return;
+    }
+    restoreHomeScroll(feedContainer.current, desiredPosition);
+    restoredFeed.current = feed;
+    setReady(true);
+  }, [feed, posts, loadedPages, desiredPosition, hasNextPage, isError, isFetching, fetchStatus, fetchNextPage]);
+
   useEffect(() => {
     if (
-      isFollowingFeed &&
+      ready &&
       inView &&
       hasNextPage &&
       fetchStatus === "idle" &&
-      !isFollowingError
+      !isFetching &&
+      !isError
     ) {
       void fetchNextPage({ cancelRefetch: false });
     }
-  }, [fetchNextPage, fetchStatus, hasNextPage, inView, isFollowingError, isFollowingFeed]);
+  }, [fetchNextPage, fetchStatus, hasNextPage, inView, isError, isFetching, ready]);
 
-  const selectFeed = (nextFeed: Feed) => {
+  const selectFeed = (nextFeed: HomeFeed) => {
     if (nextFeed === feed) return;
+    if (feedContainer.current && restoredFeed.current === feed) {
+      rememberHomeScroll(viewerId, feed, captureHomeScroll(feedContainer.current, loadedPages));
+    }
+    rememberHomeFeed(viewerId, nextFeed);
+    restoredFeed.current = undefined;
+    setReady(false);
     setFeed(nextFeed);
-    feedContainer.current?.scrollTo({ top: 0 });
   };
 
   return (
@@ -128,7 +195,7 @@ const Home = () => {
             aria-label={isFollowingFeed ? "Following" : "All posts"}
             className="flex w-full flex-col items-center gap-6"
           >
-            {activeFeed.isLoading || (isFollowingFeed && isAuthLoading) ? (
+            {(activeFeed.isLoading && !posts) || (isFollowingFeed && isAuthLoading) ? (
               <Loader />
             ) : isFollowingFeed && !isAuthenticated ? (
               <div className="flex flex-col items-center gap-3 text-center">
@@ -141,7 +208,7 @@ const Home = () => {
                 isFetching={activeFeed.isFetching}
                 onRetry={() => void activeFeed.refetch()}
               />
-            ) : posts.length === 0 && !(isFollowingFeed && hasNextPage) ? (
+            ) : posts.length === 0 && !hasNextPage ? (
               <div className="flex flex-col items-center gap-3 py-6 text-center">
                 <p className="text-light-3">
                   {isFollowingFeed ? "No posts from people you follow yet." : "No posts yet."}
@@ -152,10 +219,13 @@ const Home = () => {
               </div>
             ) : (
               <>
+                {!ready && desiredPosition.top > 0 && (
+                  <p role="status" className="sr-only">Restoring your place…</p>
+                )}
                 {posts.length > 0 && (
                   <ul className="flex w-full flex-col gap-9">
                     {posts.map((post) => (
-                      <li key={post.$id} className="flex justify-center w-full">
+                      <li key={post.$id} data-home-post={post.$id} className="flex justify-center w-full">
                         <PostCard post={post} />
                       </li>
                     ))}
@@ -167,13 +237,13 @@ const Home = () => {
                     isFetching={activeFeed.isFetching}
                     onRetry={() => void activeFeed.refetch()}
                   />
-                ) : isFollowingFeed && hasNextPage && (
+                ) : hasNextPage && (
                   <div ref={nextPageRef} className="flex w-full justify-center">
                     <Button
                       type="button"
                       variant="ghost"
                       className="text-light-3 hover:bg-dark-4"
-                      disabled={fetchStatus !== "idle"}
+                      disabled={fetchStatus !== "idle" || isFetching || !ready}
                       onClick={() => void fetchNextPage({ cancelRefetch: false })}
                     >
                       {isFetchingNextPage ? "Loading…" : "Load more"}
@@ -208,6 +278,12 @@ const Home = () => {
       </div>
     </div>
   );
+};
+
+const Home = () => {
+  const { user, isLoading } = useUserContext();
+  if (isLoading) return <div className="flex-center w-full h-full"><Loader /></div>;
+  return <HomeContent key={user.id || "guest"} viewerId={user.id || "guest"} />;
 };
 
 export default Home;

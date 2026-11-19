@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { convertFileToUrl } from "@/lib/utils";
 import { Button } from "../ui/button";
@@ -6,26 +6,35 @@ import { Button } from "../ui/button";
 type FileUploaderProps = {
   fieldChange: (files: File[]) => void;
   mediaUrl?: string;
+  files: File[];
+  disabled?: boolean;
 };
 
-const FileUploader = ({ fieldChange, mediaUrl }: FileUploaderProps) => {
+const FileUploader = ({ fieldChange, mediaUrl, files, disabled = false }: FileUploaderProps) => {
   const [previewUrl, setPreviewUrl] = useState<string>();
   const fileUrl = previewUrl ?? mediaUrl;
+  const selectedFile = files[0];
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
 
   useEffect(() => {
-    if (previewUrl) return () => URL.revokeObjectURL(previewUrl);
-  }, [previewUrl]);
+    const url = selectedFile ? convertFileToUrl(selectedFile) : undefined;
+    setPreviewUrl(url);
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [selectedFile]);
 
   const onDropAccepted = useCallback(
     (acceptedFiles: File[]) => {
-      fieldChange(acceptedFiles);
-      setPreviewUrl(convertFileToUrl(acceptedFiles[0]));
+      // An already-open file picker may finish after publication starts.
+      if (!disabledRef.current) fieldChange(acceptedFiles);
     },
     [fieldChange]
   );
 
   const { getRootProps, getInputProps, fileRejections } = useDropzone({
     onDropAccepted,
+    useFsAccessApi: false,
+    disabled,
     multiple: false,
     minSize: 1,
     accept: {
@@ -36,7 +45,8 @@ const FileUploader = ({ fieldChange, mediaUrl }: FileUploaderProps) => {
   return (
     <div
       {...getRootProps()}
-      className="flex flex-center flex-col bg-dark-3 rounded-xl cursor-pointer"
+      aria-disabled={disabled}
+      className={`flex flex-center flex-col bg-dark-3 rounded-xl ${disabled ? "cursor-wait opacity-60" : "cursor-pointer"}`}
     >
       <input {...getInputProps()} className="cursor-pointer" />
 
@@ -61,10 +71,25 @@ const FileUploader = ({ fieldChange, mediaUrl }: FileUploaderProps) => {
           </h3>
           <p className="text-light-4 small-regular mb-6">For example, PNG or JPG</p>
 
-          <Button type="button" className="shad-button_dark_4">
+          <Button type="button" disabled={disabled} className="shad-button_dark_4">
             Select from computer
           </Button>
         </div>
+      )}
+      {selectedFile && (
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={disabled}
+          className="mb-4 text-light-2"
+          onKeyDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (!disabledRef.current) fieldChange([]);
+          }}
+        >
+          {mediaUrl ? "Use current photo" : "Remove photo"}
+        </Button>
       )}
       {fileRejections.length > 0 && (
         <p role="alert" className="small-regular px-4 pb-4 text-red-400">

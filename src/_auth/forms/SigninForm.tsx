@@ -2,7 +2,7 @@ import { useState } from "react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import {
   Form,
@@ -20,9 +20,11 @@ import { SigninValidation } from "@/lib/validation";
 import { useSignInAccount } from "@/lib/react-query/queriesAndMutations";
 import { useUserContext } from "@/context/AuthContext";
 import { authErrorMessage } from "@/lib/authErrors";
+import { postLoginDestination } from "@/lib/postLoginDestination";
 
 const SigninForm = () => {
   const navigate = useNavigate();
+  const { state } = useLocation();
   const { checkAuthUser } = useUserContext();
   const [submitError, setSubmitError] = useState("");
   const [needsProfile, setNeedsProfile] = useState(false);
@@ -44,7 +46,7 @@ const SigninForm = () => {
     try {
       await signInAccount(user);
       if (await checkAuthUser()) {
-        navigate("/");
+        navigate(postLoginDestination(state), { replace: true });
         return;
       }
       setSubmitError("You are signed in, but your profile could not be loaded. Retry or finish your profile.");
@@ -103,6 +105,7 @@ const SigninForm = () => {
 
         <Link
           to="/forgot-password"
+          state={state}
           className="text-sm text-[#c2b9ff] underline-offset-4 hover:underline"
         >
           Forgot password?
@@ -111,7 +114,7 @@ const SigninForm = () => {
           <p role="alert" className="auth-error text-sm">
             {submitError}{" "}
             {needsProfile && (
-              <Link to="/sign-up?complete=1" className="underline">
+              <Link to="/sign-up?complete=1" state={state} className="underline">
                 Finish your profile
               </Link>
             )}
@@ -134,7 +137,7 @@ const SigninForm = () => {
 
       <p className="auth-footer">
         Don&apos;t have an account?{" "}
-        <Link to="/sign-up">Sign up</Link>
+        <Link to="/sign-up" state={state}>Sign up</Link>
       </p>
     </Form>
   );
