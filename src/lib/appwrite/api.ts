@@ -220,6 +220,7 @@ export async function createPost(post: INewPost) {
     return withFileViewUrls(newPost);
   } catch (error) {
     console.log(error);
+    throw error;
   }
 }
 
@@ -242,6 +243,7 @@ export async function uploadFile(file: File, onProgress?: (progress: PostSavePro
     return uploadedFile;
   } catch (error) {
     console.log(error);
+    throw error;
   }
 }
 
@@ -366,6 +368,7 @@ export async function updatePost(post: IUpdatePost) {
     return withFileViewUrls(updatedPost);
   } catch (error) {
     console.log(error);
+    throw error;
   }
 }
 

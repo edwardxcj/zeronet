@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import ts from "typescript";
+import { postSaveErrorMessage } from "../src/lib/postErrors.ts";
 
 let fixtureId = 0;
 async function loadPostApi(t, { storage = {}, databases = {} } = {}) {
@@ -103,8 +104,46 @@ test("upload failure never reports completion or writes a post", async (t) => {
     storage: { createFile: async () => { throw new TypeError("Connection interrupted"); } },
     databases: { createDocument: async () => { writes++; } },
   });
-  const result = await api.createPost({ userId: "person-1", caption: "Keep my draft", file: [new File(["photo"], "photo.jpg")], onProgress: (value) => progress.push(value) });
-  assert.equal(result, undefined);
+  await assert.rejects(api.createPost({ userId: "person-1", caption: "Keep my draft", file: [new File(["photo"], "photo.jpg")], onProgress: (value) => progress.push(value) }), TypeError);
   assert.equal(writes, 0);
   assert.deepEqual(progress, [{ phase: "uploading" }]);
+});
+
+test("size-limit failures survive upload and post wrappers and show a safe actionable message", async (t) => {
+  t.mock.method(console, "log", () => {});
+  const error = { code: 400, type: "storage_invalid_file_size", message: "private bucket configuration" };
+  const api = await loadPostApi(t, {
+    storage: { createFile: async () => { throw error; } },
+  });
+  const file = new File(["photo"], "photo.jpg");
+  for (const request of [
+    () => api.uploadFile(file),
+    () => api.createPost({ userId: "person-1", caption: "Keep my draft", file: [file] }),
+    () => api.updatePost({ postId: "post-1", caption: "Keep my draft", imageId: "old-image", imageUrl: new URL("https://example.test/old.jpg"), file: [file] }),
+  ]) {
+    await assert.rejects(request(), (received) => received === error);
+  }
+  for (const action of ["Create", "Update"]) {
+    assert.equal(postSaveErrorMessage(error, action), "This photo exceeds the upload size limit. Choose a smaller image and try again. Your draft is still here.");
+    assert.doesNotMatch(postSaveErrorMessage(error, action), /private|\d+\s*(mb|kb)/i);
+  }
+});
+
+test("document write failures reject and unknown server details never reach the form message", async (t) => {
+  t.mock.method(console, "log", () => {});
+  const error = { code: 403, type: "general_unauthorized_scope", message: "secret internal server details" };
+  const api = await loadPostApi(t, {
+    storage: { createFile: async () => ({ $id: "new-image" }) },
+    databases: {
+      createDocument: async () => { throw error; },
+      updateDocument: async () => { throw error; },
+    },
+  });
+  await assert.rejects(api.createPost({ userId: "person-1", caption: "Draft", file: [new File(["photo"], "photo.jpg")] }), (received) => received === error);
+  await assert.rejects(api.updatePost({ postId: "post-1", caption: "Draft", imageId: "old-image", imageUrl: new URL("https://example.test/old.jpg"), file: [] }), (received) => received === error);
+  for (const value of [error, new TypeError("secret internal server details"), null, undefined]) {
+    assert.match(postSaveErrorMessage(value, "Create"), /publish.*still here.*Try again/);
+    assert.match(postSaveErrorMessage(value, "Update"), /save.*still here.*Try again/);
+    assert.doesNotMatch(postSaveErrorMessage(value, "Create"), /secret|internal|server details/);
+  }
 });

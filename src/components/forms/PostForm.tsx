@@ -25,6 +25,7 @@ import { Input } from "../ui/input";
 import { useToast } from "../ui/use-toast";
 import usePostDraft from "@/hooks/usePostDraft";
 import { type PostSaveProgress } from "@/types";
+import { postSaveErrorMessage } from "@/lib/postErrors";
 
 type PostFormProps =
   | { action: "Create"; post?: never }
@@ -164,13 +165,9 @@ const PostForm = ({ post, action }: PostFormProps) => {
         });
       }
       navigate(destination);
-    } catch {
+    } catch (error) {
       if (isCurrent()) {
-        setSubmitError(
-          action === "Create"
-            ? "Couldn’t publish your post. Your changes are still here. Try again."
-            : "Couldn’t save your changes. Try again."
-        );
+        setSubmitError(postSaveErrorMessage(error, action));
       }
     } finally {
       publishing.current = false;
