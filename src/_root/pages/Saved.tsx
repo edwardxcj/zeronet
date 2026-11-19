@@ -2,15 +2,13 @@ import GridPostList from "@/components/shared/GridPostList";
 import Loader from "@/components/shared/Loader";
 import { Button } from "@/components/ui/button";
 import { useGetCurrentUser } from "@/lib/react-query/queriesAndMutations";
-import { relationshipDocuments } from "@/lib/appwrite/relationships";
+import { useCollectedPosts } from "@/lib/react-query/postCollections";
 
 const Saved = () => {
   const { data: currentUser, isPending, isPaused, isFetching, refetch } =
     useGetCurrentUser();
 
-  const savedPosts = relationshipDocuments(
-    relationshipDocuments(currentUser?.save).map((record) => record.post)
-  ).reverse();
+  const posts = useCollectedPosts("saved", currentUser);
 
   return (
     <div className="saved-container">
@@ -38,8 +36,17 @@ const Saved = () => {
             Try again
           </Button>
         </div>
-      ) : savedPosts.length > 0 ? (
-        <GridPostList posts={savedPosts} showStats={false} />
+      ) : posts.isPending && !posts.isPaused ? (
+        <Loader />
+      ) : !posts.data ? (
+        <div className="flex flex-col items-center gap-3" role="status">
+          <p className="text-light-4">Could not load saved posts.</p>
+          <Button className="shad-button_dark_4" disabled={posts.isFetching} onClick={() => void posts.refetch()}>
+            Try again
+          </Button>
+        </div>
+      ) : posts.data.length > 0 ? (
+        <GridPostList posts={posts.data} showStats={false} />
       ) : (
         <p className="text-light-4">No saved posts to show.</p>
       )}

@@ -182,6 +182,61 @@ test("guest session checks return null without logging expected authentication f
   assert.equal(log.mock.calls.length, 0);
 });
 
+test("current-user reads preserve the viewer and any expanded relationship data", async (t) => {
+  const profile = {
+    $id: "viewer-profile",
+    accountId: "account-1",
+    name: "Viewer name",
+    email: "viewer@example.test",
+    imageUrl: "https://example.test/viewer.jpg",
+    save: [{
+      $id: "save-record-1",
+      post: {
+        $id: "saved-post-1",
+        caption: "A saved photo",
+        creator: { $id: "saved-author", name: "Saved author name", imageUrl: "https://example.test/saved-author.jpg" },
+      },
+    }, { $id: "save-record-deleted", post: null }],
+    liked: [{
+      $id: "liked-post-1",
+      caption: "A liked photo",
+      creator: { $id: "liked-author", name: "Liked author name", imageUrl: "https://example.test/liked-author.jpg" },
+      likes: ["viewer-profile", "another-profile"],
+    }],
+  };
+  const reads = [];
+  const api = await loadAuthApi(t, {
+    databases: { listDocuments: async (...args) => {
+      reads.push(args);
+      return { documents: [structuredClone(profile)], total: 1 };
+    } },
+  });
+
+  const current = await api.getCurrentUser();
+  assert.equal(reads.length, 1);
+  const [databaseId, collectionId, queries] = reads[0];
+  assert.equal(databaseId, "database-1");
+  assert.equal(collectionId, "users-1");
+  assert.ok(queries.some((query) => /^equal\("accountId",/.test(query) && query.includes('"account-1"')));
+  assert.ok(queries.includes("limit(1)"));
+  assert.deepEqual(current, profile);
+  assert.equal(current.$id, "viewer-profile");
+  assert.equal(current.accountId, "account-1");
+  assert.equal(current.save[0].$id, "save-record-1");
+  assert.equal(current.save[0].post.creator.name, "Saved author name");
+  assert.equal(current.save[0].post.creator.imageUrl, "https://example.test/saved-author.jpg");
+  assert.equal(current.save[1].post, null);
+  assert.equal(current.liked[0].creator.name, "Liked author name");
+  assert.equal(current.liked[0].creator.imageUrl, "https://example.test/liked-author.jpg");
+});
+
+test("an authenticated account without a profile still returns null instead of fabricating the viewer", async (t) => {
+  const api = await loadAuthApi(t, {
+    databases: { listDocuments: async () => ({ documents: [], total: 0 }) },
+  });
+  assert.equal(await api.getCurrentUser(), null);
+});
+
 async function authProviderFixture(t) {
   const fixture = {
     states: [],
